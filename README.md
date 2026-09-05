@@ -104,6 +104,13 @@ pulls in a print stack or other optional weight by accident.
   Pi-Apps loop and skips the theme with a clear message if that install did not
   succeed, rather than letting Pi-Apps fail opaquely. Both live inside the
   `SKIP_PI_APPS` guard, so skipping Pi-Apps skips geany too.
+- **dropbear's systemd unit name varies by release.** Older Debian wraps a
+  sysvinit script as `dropbear.service`; newer releases ship native units where
+  `dropbear.socket` holds the port and a `dropbear@.service` instance is
+  spawned per connection. There is no unit plainly named `dropbear` on the
+  newer layout. Step 22 detects which exists and prefers the socket — like
+  sshd under `ssh.socket`, it costs no resident memory while idle, so a
+  reading of `dropbear resident: 0 kB` is correct rather than a failure.
 - **avahi-daemon is left running on purpose.** It publishes the Pi as
   `<hostname>.local` over mDNS, so `ssh pi@raspberrypi.local` keeps working.
   Turning it off in the same run that swaps the SSH server (step 22) would mean
@@ -141,6 +148,14 @@ release. Note this ran on an x86 Ubuntu container, **not** on a Pi:
   PATH entry.
 - **Openbox was actually started under Xvfb** with the generated theme, rc.xml
   and menu.xml, and came up with no warnings or errors.
+
+A sixth surfaced on first real hardware: step 22 hardcoded
+`systemctl enable --now dropbear`, which does not exist on releases that ship
+`dropbear.socket`, and the "is anything listening on :22" test that followed
+passed on a lingering `sshd` — so OpenSSH could be purged while dropbear had
+never started, leaving no SSH server at all. The step now detects the real unit
+and requires dropbear to be active AND the `:22` listener not to be sshd before
+purging anything.
 
 Five real bugs were found and fixed this way: an unquoted `#` in a `.desktop`
 `Exec` (a reserved character the spec rejects), a dangling

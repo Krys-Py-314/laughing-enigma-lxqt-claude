@@ -254,9 +254,9 @@ apt_install \
     xdg-utils \
     xdg-user-dirs \
     shared-mime-info \
-    desktop-file-utils \
-    hicolor-icon-theme \
-    adwaita-icon-theme
+    desktop-file-utils 
+#    hicolor-icon-theme \
+#    adwaita-icon-theme
 
 # Allow a console user to start X without root privileges (rootless X on KMS).
 sudo tee /etc/X11/Xwrapper.config >/dev/null <<'EOF'

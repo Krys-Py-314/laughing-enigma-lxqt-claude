@@ -212,10 +212,18 @@ banner "02 - Installing themes, icons and Kvantum"
 
 apt_install arc-theme lxqt-themes papirus-icon-theme
 
-# Kvantum is split by Qt major version. LXQt 2.x is Qt6, LXQt 1.x is Qt5, so
-# install whichever this release actually carries - both, where both exist.
-apt_install qt5-style-kvantum qt5-style-kvantum-themes
-apt_install qt6-style-kvantum qt6-style-kvantum-themes
+# Kvantum packaging changed in Trixie: qt-style-kvantum is now one package
+# serving both Qt5 and Qt6, the themes merged into qt-style-kvantum-themes,
+# and qt5-/qt6-style-kvantum became transitional dummies. The versioned
+# *-themes packages do not exist there at all - installing only those would
+# bring the engine in via the dummies but leave no themes behind. Prefer the
+# unified names, fall back to the split ones on Bookworm and earlier.
+if pkg_available qt-style-kvantum; then
+    apt_install qt-style-kvantum qt-style-kvantum-themes
+else
+    apt_install qt5-style-kvantum qt5-style-kvantum-themes
+    apt_install qt6-style-kvantum qt6-style-kvantum-themes
+fi
 
 # lxqt-config provides the LXQt Configuration Center; pcmanfm-qt draws the
 # desktop. Both may already be present from the base script.

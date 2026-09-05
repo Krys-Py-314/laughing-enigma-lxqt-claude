@@ -265,6 +265,13 @@ mode as the Arc-Dark problem above. Verify with
 
 ### Other notes
 
+- **Kvantum's packaging changed in Trixie.** It is now one version-agnostic
+  `qt-style-kvantum` serving both Qt5 and Qt6, with the themes merged into
+  `qt-style-kvantum-themes`; `qt5-style-kvantum` and `qt6-style-kvantum` are
+  transitional dummies, and the versioned `*-themes` packages are gone. The
+  script prefers the unified names and falls back to the split ones on Bookworm
+  and earlier — asking only for the versioned packages on Trixie would pull the
+  engine in through the dummies but install no themes at all.
 - **`lxqt-panel` has no separator plugin.** Each requested "Separator" is a
   fixed 8 px `spacer`, which is the conventional stand-in.
 - **Debian ships no `.desktop` file for urxvt**, so the script writes one into

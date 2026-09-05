@@ -9,7 +9,7 @@ chmod +x inst-min-lxqt-rpi5.sh
 ```
 
 Run it as a **normal user with sudo rights**, not as root. Everything is
-logged to `~/inst-min-lxqt-rpi5.log`.
+logged to `~/.inst-min-lxqt-rpi5.log`.
 
 ## Flags
 
@@ -210,6 +210,8 @@ chmod +x inst_dark_theme_and_icons.sh
 |---|---|
 | `NO_DESKTOP=1` | Do not enable the PCManFM-Qt desktop process |
 | `ASSUME_YES=1` | Never prompt (unattended run) |
+
+Output is logged to `~/inst_dark_theme_and_icons.log`.
 
 | Setting | Value |
 |---|---|

@@ -38,10 +38,11 @@ logged to `~/inst-min-lxqt-rpi5.log`.
 | Recorder | `screenrec` (ffmpeg x11grab wrapper) | Zero resident memory when not recording, unlike any GUI recorder |
 | Screenshots | scrot | Makes Openbox's stock `Alt+Print` binding work (~60 KB) |
 | Icons | Numix-Circle | Circular app icons, dark Numix folder icons |
-| Fonts | Ubuntu + UbuntuMono Nerd Font, size 11 | Applied to fontconfig, Qt/LXQt, GTK2, GTK3 and urxvt |
+| Fonts | Ubuntu + UbuntuMono Nerd Font, size 12 | Applied to fontconfig, Qt/LXQt, GTK2, GTK3 and urxvt |
 | SSH | dropbear replaces OpenSSH | ~1 MB resident vs ~8 MB |
 | Prompt | oh-my-posh | Requested |
 | Dev | gcc, g++, make, libgpiod, raspi-utils-core, git, curl | See GPIO note below |
+| Editor (dev) | geany | Installed explicitly in step 20 so the Pi-Apps "Geany Dark Mode" theme has something to theme |
 
 Printing is pinned out entirely (`Pin-Priority: -1` on cups and
 `printer-driver-*`), and `APT::Install-Recommends "false"` is set so nothing
@@ -130,16 +131,20 @@ release. Note this ran on an x86 Ubuntu container, **not** on a Pi:
 - Config generation replayed into a throwaway `$HOME`: `rc.xml` and `menu.xml`
   validated with `xmllint`, `.Xresources` parsed by `xrdb -n` (37 resources),
   `.desktop` files validated with `desktop-file-validate`, `.bashrc` sourced to
-  confirm the four aliases and the PATH entry.
+  confirm the six aliases (`ll`, `la`, `edit`, `leafpad`, `hh`, `hl`) and the
+  PATH entry.
 - **Openbox was actually started under Xvfb** with the generated theme, rc.xml
   and menu.xml, and came up with no warnings or errors.
 
-Four real bugs were found and fixed this way: an unquoted `#` in a `.desktop`
+Five real bugs were found and fixed this way: an unquoted `#` in a `.desktop`
 `Exec` (a reserved character the spec rejects), a dangling
 `/var/lib/openbox/debian-menu.xml` reference inherited from Debian's stock
 rc.xml that warned on every start, a dropbear fallback that could never fire
-because the installer treats an absent package as success, and the `exec
-startx` login-loop hazard described above.
+because the installer treats an absent package as success, the `exec startx`
+login-loop hazard described above, and a pair of aliases written with
+typographic quotes (U+2018/U+2019), which bash cannot parse — the generated
+`~/.bashrc` aborted at that line and everything below it, including the
+oh-my-posh prompt block, silently never ran.
 
 **Not verified:** no step was run against Raspberry Pi OS on real Pi 5
 hardware. Package availability was confirmed from the Debian and Raspberry Pi

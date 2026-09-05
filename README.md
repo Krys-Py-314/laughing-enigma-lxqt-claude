@@ -238,6 +238,30 @@ Output is logged to `~/inst_dark_theme_and_icons.log`.
    in one place, "Numix Circle" in the Config Center block. Papirus-Dark is
    applied; Numix-Circle stays installed and selectable in `lxqt-config`.
 
+### The Nord Openbox theme (reference VM)
+
+Not used by the script, recorded so the provenance is not lost. The Nord
+Openbox theme on the reference VM came from
+<https://gitlab.com/the-zero885/nord-openbox-theme> — downloaded as a `.tar.gz`
+to `$HOME/Downloads`, extracted, and the `Nord-Openbox` folder copied into
+`/usr/share/themes/`. It is not in the Debian archive, so it cannot be
+`apt install`ed.
+
+To reproduce it on the Pi:
+
+```bash
+cd ~/Downloads
+tar xzf nord-openbox-theme-*.tar.gz
+sudo cp -r Nord-Openbox /usr/share/themes/
+openbox --reconfigure
+```
+
+**Check the directory name before pointing `rc.xml` at it.** Openbox takes the
+theme name from the folder, so a folder called `Nord-Openbox` is the theme
+`Nord-Openbox`, not `Nord` — and naming a theme that does not exist makes
+Openbox fall back to its default silently, which is exactly how the Arc-Dark
+problem above hides itself. Confirm with `ls -d /usr/share/themes/*/openbox-3`.
+
 ### Other notes
 
 - **`lxqt-panel` has no separator plugin.** Each requested "Separator" is a

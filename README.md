@@ -243,24 +243,25 @@ Output is logged to `~/inst_dark_theme_and_icons.log`.
 Not used by the script, recorded so the provenance is not lost. The Nord
 Openbox theme on the reference VM came from
 <https://gitlab.com/the-zero885/nord-openbox-theme> — downloaded as a `.tar.gz`
-to `$HOME/Downloads`, extracted, and the `Nord-Openbox` folder copied into
-`/usr/share/themes/`. It is not in the Debian archive, so it cannot be
-`apt install`ed.
+to `$HOME/Downloads` and extracted, which yields a folder named
+`Nord-Openbox`. That folder was copied to `/usr/share/themes/` **and renamed
+to `Nord`**, which is why ObConf lists the theme as `Nord`. It is not in the
+Debian archive, so it cannot be `apt install`ed.
 
 To reproduce it on the Pi:
 
 ```bash
 cd ~/Downloads
 tar xzf nord-openbox-theme-*.tar.gz
-sudo cp -r Nord-Openbox /usr/share/themes/
+sudo cp -r Nord-Openbox /usr/share/themes/Nord    # the rename matters
 openbox --reconfigure
 ```
 
-**Check the directory name before pointing `rc.xml` at it.** Openbox takes the
-theme name from the folder, so a folder called `Nord-Openbox` is the theme
-`Nord-Openbox`, not `Nord` — and naming a theme that does not exist makes
-Openbox fall back to its default silently, which is exactly how the Arc-Dark
-problem above hides itself. Confirm with `ls -d /usr/share/themes/*/openbox-3`.
+The rename is not cosmetic: Openbox derives the theme name from the directory,
+so `rc.xml` must contain `<name>Nord</name>` to match. Naming a theme that does
+not exist makes Openbox fall back to its default *silently* — the same failure
+mode as the Arc-Dark problem above. Verify with
+`ls -d /usr/share/themes/*/openbox-3`.
 
 ### Other notes
 

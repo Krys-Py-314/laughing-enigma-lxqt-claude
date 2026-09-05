@@ -12,7 +12,7 @@
 # Environment overrides:
 #     SKIP_SSH_SWAP=1     keep OpenSSH, do not install/switch to dropbear
 #     SKIP_PI_APPS=1      skip Pi-Apps + Min + Geany Dark Mode
-#     SKIP_TRIM=1         do not disable avahi-daemon / triggerhappy
+#     SKIP_TRIM=1         do not disable triggerhappy
 #     ASSUME_YES=1        never prompt (non-interactive)
 #
 
@@ -1057,25 +1057,32 @@ else
 fi
 
 # ===========================================================================
-banner "21 - Trimming background services for a smaller resident footprint"
+banner "21 - Disabling the idle triggerhappy hotkey daemon"
 # ===========================================================================
 
 if [ "$SKIP_TRIM" = "1" ]; then
     print_warning "SKIP_TRIM=1 -> leaving background services alone."
 else
-    for svc in avahi-daemon triggerhappy; do
-        if systemctl list-unit-files 2>/dev/null | grep -q "^${svc}\.service"; then
-            if sudo systemctl disable --now "${svc}.service" >>"$LOGFILE" 2>&1; then
-                print_status "Disabled ${svc} (re-enable with: sudo systemctl enable --now ${svc})"
-            else
-                print_warning "Could not disable ${svc}."
-            fi
+    # triggerhappy (thd) is a global hotkey daemon for console-level key
+    # bindings. Raspberry Pi OS enables it with no triggers configured, and
+    # under LXQt the hotkeys come from lxqt-globalkeys and Openbox's rc.xml
+    # instead, so it is idle on this build.
+    if systemctl list-unit-files 2>/dev/null | grep -q '^triggerhappy\.service'; then
+        if sudo systemctl disable --now triggerhappy.service >>"$LOGFILE" 2>&1; then
+            print_status "Disabled triggerhappy (re-enable with: sudo systemctl enable --now triggerhappy)"
+        else
+            print_warning "Could not disable triggerhappy."
         fi
-    done
-    # avahi is socket-activated as well.
-    if systemctl list-unit-files 2>/dev/null | grep -q '^avahi-daemon\.socket'; then
-        sudo systemctl disable --now avahi-daemon.socket >>"$LOGFILE" 2>&1 || true
     fi
+    # triggerhappy is socket-activated as well.
+    if systemctl list-unit-files 2>/dev/null | grep -q '^triggerhappy\.socket'; then
+        sudo systemctl disable --now triggerhappy.socket >>"$LOGFILE" 2>&1 || true
+    fi
+
+    # avahi-daemon is deliberately LEFT RUNNING: it publishes the Pi as
+    # <hostname>.local over mDNS. Disabling it would break 'ssh pi@raspberrypi.local'
+    # right before step 22 swaps the SSH server out from under you.
+    print_status "avahi-daemon left running (keeps <hostname>.local reachable)."
     print_warning "Bluetooth and Wi-Fi services were left untouched on purpose."
 fi
 

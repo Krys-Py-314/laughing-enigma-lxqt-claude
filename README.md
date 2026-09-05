@@ -17,7 +17,7 @@ logged to `~/inst-min-lxqt-rpi5.log`.
 |---|---|
 | `SKIP_SSH_SWAP=1` | Keep OpenSSH; do not install or switch to dropbear |
 | `SKIP_PI_APPS=1`  | Skip Pi-Apps, Min and Geany Dark Mode |
-| `SKIP_TRIM=1`     | Do not disable avahi-daemon / triggerhappy |
+| `SKIP_TRIM=1`     | Do not disable triggerhappy |
 | `ASSUME_YES=1`    | Never prompt (unattended run) |
 
 ## What gets installed
@@ -85,6 +85,13 @@ pulls in a print stack or other optional weight by accident.
 - **Pi 5 GPIO.** `wiringPi`, `bcm2835` and `pigpio` poke SoC registers directly
   and do **not** work on the Pi 5's RP1 southbridge. Use libgpiod, lgpio, or
   `pinctrl`.
+- **avahi-daemon is left running on purpose.** It publishes the Pi as
+  `<hostname>.local` over mDNS, so `ssh pi@raspberrypi.local` keeps working.
+  Turning it off in the same run that swaps the SSH server (step 22) would mean
+  reconnecting to a changed daemon at an address that no longer resolves. The
+  only service the script disables is **triggerhappy**, a console hotkey daemon
+  that Raspberry Pi OS enables with no triggers configured and that LXQt
+  replaces with `lxqt-globalkeys` and Openbox's `rc.xml`.
 - **No desktop icons.** That is the direct cost of not running a desktop
   process. If you want them, drop the `Hidden=true` override in
   `~/.config/autostart/` and enable pcmanfm-qt's desktop — it is already

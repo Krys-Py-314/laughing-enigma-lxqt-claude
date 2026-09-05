@@ -209,6 +209,7 @@ chmod +x inst_dark_theme_and_icons.sh
 | Variable | Effect |
 |---|---|
 | `NO_DESKTOP=1` | Do not enable the PCManFM-Qt desktop process |
+| `NO_APPLETS=1` | Do not install the system tray applications |
 | `ASSUME_YES=1` | Never prompt (unattended run) |
 
 Output is logged to `~/inst_dark_theme_and_icons.log`.
@@ -221,7 +222,8 @@ Output is logged to `~/inst_dark_theme_and_icons.log`.
 | LXQt theme | `kvantum` (shipped by `lxqt-themes`) |
 | Openbox | generated `Arc-Dark-Square` — square 1px borders |
 | Font | Ubuntu Nerd Font 10, Normal |
-| Panel | 48 px tall, 38 px icons, bottom, raspberry menu icon |
+| Panel | 32 px tall, 22 px icons, bottom, raspberry menu icon |
+| Tray applets | lxqt-powermanagement, nm-applet, qlipper, lxqt-notificationd |
 | Desktop | PCManFM-Qt, 48×48 icons, Sans 11 labels, white on `#383C48` |
 
 ### Three things the spec asked for that needed a decision
@@ -272,6 +274,20 @@ mode as the Arc-Dark problem above. Verify with
   script prefers the unified names and falls back to the split ones on Bookworm
   and earlier — asking only for the versioned packages on Trixie would pull the
   engine in through the dummies but install no themes at all.
+- **`tray` and `statusnotifier` are hosts, not containers.** They display
+  whatever applications register an icon with them, so nothing appears in
+  either one when the applications are not installed or not autostarted — no
+  panel setting adds entries. Step 10 installs `lxqt-powermanagement`,
+  `network-manager-gnome` (nm-applet), `qlipper` and `lxqt-notificationd` and
+  makes sure they autostart, including removing the `Hidden=true` stub the base
+  script wrote to suppress power management. That is roughly 50–70 MB RSS, so
+  `NO_APPLETS=1` skips it.
+- **Neither the clock nor the keyboard indicator has a font setting.** It is an
+  open upstream issue ([lxqt-panel#967](https://github.com/lxqt/lxqt-panel/issues/967)).
+  The clock is sized through HTML in its `customFormat`, which upstream
+  supports. The `font` key written for `kbindicator` is best-effort: if your
+  version ignores it, the only other lever is the LXQt Qt font, which resizes
+  every panel plugin at once.
 - **`lxqt-panel` has no separator plugin.** Each requested "Separator" is a
   fixed 8 px `spacer`, which is the conventional stand-in.
 - **Debian ships no `.desktop` file for urxvt**, so the script writes one into

@@ -14,6 +14,7 @@
 #
 # Environment overrides:
 #     NO_DESKTOP=1     do not enable the PCManFM-Qt desktop process
+#     NO_APPLETS=1     do not install the system tray applications
 #     ASSUME_YES=1     never prompt (non-interactive)
 #
 
@@ -82,8 +83,13 @@ UI_FONT_SIZE=10
 DESKTOP_LABEL_FONT="Sans"
 DESKTOP_LABEL_SIZE=11
 
-PANEL_HEIGHT=48
-PANEL_ICON_SIZE=38
+PANEL_HEIGHT=32
+PANEL_ICON_SIZE=22
+
+# The clock and the Caps/Num/Scroll indicator carry small text that gets hard
+# to read on a 32px panel, so they are sized independently of the UI font.
+PANEL_CLOCK_FONT_PT=12
+PANEL_KB_FONT_PT=12
 
 OB_THEME="Arc-Dark-Square"
 
@@ -628,6 +634,8 @@ expandable=false
 type=kbindicator
 capsLockIsOn=true
 numLockIsOn=true
+scrollLockIsOn=true
+font="${UI_FONT_NAME},${PANEL_KB_FONT_PT},-1,5,50,0,0,0,0,0"
 
 [sep4]
 type=spacer
@@ -650,8 +658,9 @@ showOnClicked=true
 [worldclock]
 type=worldclock
 showWeekNumber=false
-customFormat=hh:mm
 formatType=custom
+useAdvancedManualFormat=true
+customFormat=<span style="font-size:${PANEL_CLOCK_FONT_PT}pt;">hh:mm</span>
 
 [quicklaunch2]
 type=quicklaunch
@@ -695,7 +704,79 @@ print_status "Panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, bottom,
 print_warning "lxqt-panel has no true separator plugin; fixed 8px spacers are used."
 
 # ===========================================================================
-banner "10 - Applying"
+banner "10 - System tray applications (what statusnotifier actually shows)"
+# ===========================================================================
+
+# 'tray' and 'statusnotifier' are HOSTS, not containers: they display whatever
+# applications register an icon with them. Nothing appears in either one
+# because the applications are not installed or not autostarted - there is no
+# panel setting that adds them.
+#
+# inst-min-lxqt-rpi5.sh deliberately left lxqt-powermanagement out and masked
+# its autostart to save memory, so this step reverses that too.
+print_warning "These applets cost roughly 50-70 MB RSS in total, which works"
+print_warning "against the base script's minimum-memory goal. Skip this step"
+print_warning "with NO_APPLETS=1 if you would rather keep the memory."
+
+if [ "${NO_APPLETS:-0}" = "1" ]; then
+    print_warning "NO_APPLETS=1 -> tray applications not installed."
+else
+    # lxqt-powermanagement : battery/power icon and idle actions
+    # network-manager-gnome: nm-applet, the NetworkManager tray icon
+    # qlipper              : clipboard history
+    # lxqt-notificationd   : desktop notifications (usually already present)
+    apt_install lxqt-powermanagement network-manager-gnome qlipper lxqt-notificationd
+
+    # Undo the Hidden=true stubs the base script wrote to suppress these.
+    for mod in lxqt-powermanagement lxqt-notificationd; do
+        stub="$HOME/.config/autostart/${mod}.desktop"
+        if [ -f "$stub" ] && grep -q '^Hidden=true' "$stub" 2>/dev/null; then
+            rm -f "$stub"
+            print_status "Unmasked autostart for ${mod}."
+        fi
+    done
+
+    # Most of these ship their own /etc/xdg/autostart entry. Write a user one
+    # only where the system file is absent, so nothing starts twice.
+    add_autostart() {
+        local name="$1" exec_cmd="$2" bin="${3:-}"
+        [ -n "$bin" ] && ! command -v "$bin" >/dev/null 2>&1 && return 0
+        if [ -f "/etc/xdg/autostart/${name}.desktop" ]; then
+            print_status "${name}: autostarted by its own package."
+            return 0
+        fi
+        cat >"$HOME/.config/autostart/${name}.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=${name}
+Exec=${exec_cmd}
+Terminal=false
+NoDisplay=true
+X-LXQt-Module=false
+EOF
+        print_status "${name}: user autostart entry written."
+    }
+
+    mkdir -p "$HOME/.config/autostart"
+    add_autostart lxqt-powermanagement lxqt-powermanagement lxqt-powermanagement
+    add_autostart nm-applet           "nm-applet"          nm-applet
+    add_autostart qlipper             "qlipper"            qlipper
+    add_autostart lxqt-notificationd  lxqt-notificationd   lxqt-notificationd
+
+    print_status " "
+    print_status "  These will appear in the tray after the next login:"
+    for b in lxqt-powermanagement nm-applet qlipper lxqt-notificationd; do
+        if command -v "$b" >/dev/null 2>&1; then
+            printf '    present : %s\n' "$b"
+        else
+            printf '    MISSING : %s\n' "$b"
+        fi
+    done
+    print_status " "
+fi
+
+# ===========================================================================
+banner "11 - Applying"
 # ===========================================================================
 
 if [ "$LXQT_RUNNING" = "yes" ] && [ -n "${DISPLAY:-}" ]; then
@@ -710,7 +791,7 @@ else
 fi
 
 # ===========================================================================
-banner "11 - Summary"
+banner "12 - Summary"
 # ===========================================================================
 
 echo ""

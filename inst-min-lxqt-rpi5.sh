@@ -452,15 +452,15 @@ print_status "System-wide font defaults written to /etc/fonts/local.conf"
 banner "10 - Icons (circle apps, dark folders) and square Openbox theme"
 # ===========================================================================
 
-apt_install numix-icon-theme-circle numix-icon-theme
+#apt_install numix-icon-theme-circle numix-icon-theme
 
-ICON_THEME="Numix-Circle"
-if [ ! -d /usr/share/icons/Numix-Circle ]; then
-    print_warning "Numix-Circle not found; falling back to Adwaita icons."
-    ICON_THEME="Adwaita"
-else
-    print_status "Icon theme: Numix-Circle (circular app icons, dark Numix folders)."
-fi
+#ICON_THEME="Numix-Circle"
+#if [ ! -d /usr/share/icons/Numix-Circle ]; then
+#    print_warning "Numix-Circle not found; falling back to Adwaita icons."
+#    ICON_THEME="Adwaita"
+#else
+#    print_status "Icon theme: Numix-Circle (circular app icons, dark Numix folders)."
+#fi
 
 # Square, flat, dark Openbox theme matching the requested desktop colour.
 OB_THEME="SquareDark"

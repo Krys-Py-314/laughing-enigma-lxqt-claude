@@ -702,11 +702,11 @@ fi
 
 # Make sure at least one theme exists locally.
 OMP_THEME_DIR="$HOME/.cache/oh-my-posh/themes"
-if [ ! -f "${OMP_THEME_DIR}/powerlevel10k_classic.omp.json" ]; then
+if [ ! -f "${OMP_THEME_DIR}/nu4a.omp.json" ]; then
     mkdir -p "$OMP_THEME_DIR"
-    curl -fsSL --retry 2 -o "${OMP_THEME_DIR}/powerlevel10k_classic.omp.json" \
-        "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/powerlevel10k_classic.omp.json" \
-        >>"$LOGFILE" 2>&1 || print_warning "Could not fetch the 'powerlevel10k_classic' oh-my-posh theme."
+    curl -fsSL --retry 2 -o "${OMP_THEME_DIR}/nu4a.omp.json" \
+        "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/nu4a.omp.json" \
+        >>"$LOGFILE" 2>&1 || print_warning "Could not fetch the 'nu4a' oh-my-posh theme."
 fi
 
 # ===========================================================================
@@ -754,7 +754,7 @@ alias hl='history 20'
 
 # Oh My Posh prompt (only for interactive shells with a real terminal).
 if command -v oh-my-posh >/dev/null 2>&1 && [ -n "${PS1:-}" ]; then
-    __omp_theme="$HOME/.cache/oh-my-posh/themes/powerlevel10k_classic.omp.json"
+    __omp_theme="$HOME/.cache/oh-my-posh/themes/nu4a.omp.json"
     if [ -f "$__omp_theme" ]; then
         eval "$(oh-my-posh init bash --config "$__omp_theme")"
     else

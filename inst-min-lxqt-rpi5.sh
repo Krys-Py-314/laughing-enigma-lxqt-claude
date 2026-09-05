@@ -49,7 +49,7 @@ print_status "Starting Raspberry Pi 5 Minimal LXQt/Openbox Setup..."
 # ---------------------------------------------------------------------------
 # Globals / helpers
 # ---------------------------------------------------------------------------
-LOGFILE="$HOME/inst-min-lxqt-rpi5.log"
+LOGFILE="$HOME/.inst-min-lxqt-rpi5.log"
 SKIPPED_PKGS=()
 FAILED_STEPS=()
 

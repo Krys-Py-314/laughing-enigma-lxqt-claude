@@ -747,6 +747,8 @@ alias ll='ls -l'
 alias la='ls -la'
 alias edit='l3afpad'
 alias leafpad='l3afpad'
+alias hh='history’
+alias hl=‘history 20’
 
 # Oh My Posh prompt (only for interactive shells with a real terminal).
 if command -v oh-my-posh >/dev/null 2>&1 && [ -n "${PS1:-}" ]; then
@@ -1025,7 +1027,7 @@ print_status "Background set to ${BG_COLOR} via xsetroot (no wallpaper, no deskt
 # ===========================================================================
 banner "20 - Pi-Apps (64-bit) plus 'Min' and 'Geany Dark Mode'"
 # ===========================================================================
-
+sudo apt install -y --no-install-recommends geany
 if [ "$SKIP_PI_APPS" = "1" ]; then
     print_warning "SKIP_PI_APPS=1 -> skipping Pi-Apps."
 else

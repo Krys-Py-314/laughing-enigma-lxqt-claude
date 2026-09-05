@@ -104,13 +104,18 @@ pulls in a print stack or other optional weight by accident.
   Pi-Apps loop and skips the theme with a clear message if that install did not
   succeed, rather than letting Pi-Apps fail opaquely. Both live inside the
   `SKIP_PI_APPS` guard, so skipping Pi-Apps skips geany too.
-- **dropbear's systemd unit name varies by release.** Older Debian wraps a
-  sysvinit script as `dropbear.service`; newer releases ship native units where
-  `dropbear.socket` holds the port and a `dropbear@.service` instance is
-  spawned per connection. There is no unit plainly named `dropbear` on the
-  newer layout. Step 22 detects which exists and prefers the socket — like
-  sshd under `ssh.socket`, it costs no resident memory while idle, so a
+- **dropbear's init layout varies by release**, and `systemctl enable` behaves
+  differently on each: `dropbear.socket` + `dropbear@.service` (socket
+  activated), a plain `dropbear.service`, or just `/etc/init.d/dropbear` wrapped
+  by systemd — where `enable` can fail on a generated unit that starts
+  perfectly well. Step 22 therefore treats "enabled at boot" and "running now"
+  as separate questions and decides success from **which process actually holds
+  port 22**, not from any command's exit status. Under socket activation a
   reading of `dropbear resident: 0 kB` is correct rather than a failure.
+- **Running now is not the same as running after a reboot.** Where dropbear
+  starts from a sysvinit script, systemd may refuse to `enable` it, leaving a
+  working machine with no SSH server on the next boot. Step 22 checks this
+  separately and prints the `update-rc.d` fix if persistence is missing.
 - **avahi-daemon is left running on purpose.** It publishes the Pi as
   `<hostname>.local` over mDNS, so `ssh pi@raspberrypi.local` keeps working.
   Turning it off in the same run that swaps the SSH server (step 22) would mean

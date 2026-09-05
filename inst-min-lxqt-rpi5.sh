@@ -1193,14 +1193,14 @@ EOF
                     sudo systemctl disable --now "$unit" >>"$LOGFILE" 2>&1
             done
 
-            # Debian ships dropbear's units differently across releases:
-            #   older - a sysvinit script that systemd wraps as dropbear.service
-            #   newer - native units, where dropbear.socket holds the port and
-            #           a dropbear@.service instance is spawned per connection
-            # There is no unit plainly named "dropbear" on the newer layout, so
-            # detect what this release actually provides. The socket is
-            # preferred: it is Debian's current default and, like sshd under
-            # ssh.socket, costs no resident memory while idle.
+            # Debian has shipped dropbear three different ways over time:
+            #   dropbear.socket + dropbear@.service  socket-activated
+            #   dropbear.service                     native unit
+            #   /etc/init.d/dropbear                 sysvinit, systemd-wrapped
+            # 'systemctl enable' behaves differently on each - a generated sysv
+            # unit can refuse 'enable' while starting perfectly well - so pick
+            # whichever exists and judge the result by whether dropbear ends up
+            # serving, never by one command's exit status.
             DROPBEAR_UNIT=""
             for unit in dropbear.socket dropbear.service; do
                 if systemctl list-unit-files 2>/dev/null | grep -q "^${unit}"; then
@@ -1208,35 +1208,61 @@ EOF
                     break
                 fi
             done
+            if [ -z "$DROPBEAR_UNIT" ] && [ -x /etc/init.d/dropbear ]; then
+                DROPBEAR_UNIT="dropbear"
+            fi
 
             if [ -z "$DROPBEAR_UNIT" ]; then
-                note_fail "No dropbear systemd unit found (looked for dropbear.socket, dropbear.service)."
+                print_warning "No dropbear unit or init script found; trying the binary directly."
             else
-                print_status "Enabling ${DROPBEAR_UNIT}..."
-                if sudo systemctl enable --now "$DROPBEAR_UNIT" >>"$LOGFILE" 2>&1; then
-                    print_status "dropbear enabled via ${DROPBEAR_UNIT}."
-                else
-                    note_fail "Could not enable ${DROPBEAR_UNIT} (see $LOGFILE)."
-                fi
+                print_status "Bringing dropbear up via ${DROPBEAR_UNIT}..."
+                # Boot persistence and running-right-now are separate concerns.
+                # Attempt each independently; report on them separately below.
+                sudo systemctl enable "$DROPBEAR_UNIT" >>"$LOGFILE" 2>&1 \
+                    || sudo update-rc.d dropbear defaults >>"$LOGFILE" 2>&1 \
+                    || true
+                sudo systemctl start "$DROPBEAR_UNIT" >>"$LOGFILE" 2>&1 \
+                    || sudo /etc/init.d/dropbear start >>"$LOGFILE" 2>&1 \
+                    || true
             fi
 
             sleep 2
 
-            # Purging OpenSSH is only safe once dropbear itself owns :22.
-            # A naive "is anything listening on 22" test passes on a lingering
-            # sshd too, and purging then leaves the Pi with no SSH server at
-            # all - so require the dropbear unit to be active AND the listener
-            # not to be sshd.
-            DB_ACTIVE=no
-            if [ -n "$DROPBEAR_UNIT" ] && systemctl is-active "$DROPBEAR_UNIT" >/dev/null 2>&1; then
-                DB_ACTIVE=yes
-            fi
-            PORT22_OPEN=no
-            ss -ltn 2>/dev/null | grep -q ':22 ' && PORT22_OPEN=yes
-            PORT22_SSHD="$(sudo ss -ltnp 2>/dev/null | grep ':22 ' | grep -c 'sshd')"
+            # Ground truth: who actually holds port 22 right now? Purging
+            # OpenSSH is only safe once dropbear owns it. A bare "is anything
+            # listening" test passes on a leftover sshd just as happily, and
+            # purging then leaves the Pi with no SSH server at all.
+            PORT22_LINE="$(sudo ss -ltnp 2>/dev/null | grep ':22 ' | head -n1)"
+            DB_SERVING=no
+            SSHD_HOLDS=no
+            case "$PORT22_LINE" in
+                *dropbear*)
+                    DB_SERVING=yes ;;                    # classic daemon
+                *sshd*)
+                    SSHD_HOLDS=yes ;;
+                *systemd*)
+                    # Socket activation: systemd holds the port, so confirm the
+                    # listening socket belongs to dropbear and not to sshd.
+                    if systemctl is-active dropbear.socket >/dev/null 2>&1; then
+                        DB_SERVING=yes
+                    fi ;;
+            esac
 
-            if [ "$DB_ACTIVE" = "yes" ] && [ "$PORT22_OPEN" = "yes" ] && [ "$PORT22_SSHD" = "0" ]; then
-                print_status "dropbear owns port 22 via ${DROPBEAR_UNIT}."
+            if [ "$DB_SERVING" = "yes" ]; then
+                print_status "dropbear owns port 22 (verified by listening process)."
+
+                # Running now does not mean running after a reboot. A generated
+                # sysv unit often cannot be 'enabled', which would leave a
+                # working Pi with no SSH server on the next boot.
+                if systemctl is-enabled "${DROPBEAR_UNIT:-dropbear}" >/dev/null 2>&1 \
+                   || compgen -G '/etc/rc2.d/S*dropbear*' >/dev/null; then
+                    print_status "dropbear is set to start at boot."
+                else
+                    print_warning "dropbear is running but may NOT start at boot."
+                    print_warning "Check with: systemctl is-enabled dropbear"
+                    print_warning "Fix with:   sudo update-rc.d dropbear defaults"
+                fi
+
                 print_status "Purging openssh-server..."
                 if sudo apt-get -y purge openssh-server >>"$LOGFILE" 2>&1; then
                     print_status "openssh-server removed."
@@ -1267,12 +1293,13 @@ EOF
                 fi
                 print_status " "
             else
-                if [ "$PORT22_SSHD" != "0" ]; then
+                if [ "$SSHD_HOLDS" = "yes" ]; then
                     note_fail "Port 22 is still held by sshd, not dropbear - NOT purging OpenSSH."
-                elif [ "$DB_ACTIVE" != "yes" ]; then
-                    note_fail "dropbear is not active (${DROPBEAR_UNIT:-no unit}) - NOT purging OpenSSH."
+                elif [ -z "$PORT22_LINE" ]; then
+                    note_fail "Nothing is listening on port 22 - NOT purging OpenSSH."
                 else
-                    note_fail "Nothing is listening on port 22 - keeping OpenSSH installed."
+                    note_fail "Port 22 is held by something that is not dropbear - NOT purging OpenSSH."
+                    print_warning "  ${PORT22_LINE}"
                 fi
                 for unit in ssh.socket ssh.service; do
                     systemctl list-unit-files 2>/dev/null | grep -q "^${unit}" && \

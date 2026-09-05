@@ -71,6 +71,10 @@ pulls in a print stack or other optional weight by accident.
    only purges `openssh-server` *after* confirming something is listening on
    port 22 — otherwise it re-enables OpenSSH so you cannot be locked out.
    If you are running over SSH, your current session may still drop.
+8. **`openssh-client` is kept on purpose.** It is not a daemon, so it costs no
+   resident memory, and `ssh`/`scp`/`ssh-keygen` out of the Pi keep working —
+   git, rsync and ansible all invoke `/usr/bin/ssh` by name, and `dbclient` is
+   not a drop-in replacement. Only the *server* is removed.
 
 ## Notes that will bite you later
 
@@ -85,6 +89,14 @@ pulls in a print stack or other optional weight by accident.
 - **Pi 5 GPIO.** `wiringPi`, `bcm2835` and `pigpio` poke SoC registers directly
   and do **not** work on the Pi 5's RP1 southbridge. Use libgpiod, lgpio, or
   `pinctrl`.
+- **How much dropbear actually saves depends on how sshd is started.** Under
+  `ssh.service` (Bookworm) a listener is resident from boot at ~5–8 MB, so the
+  swap is a real idle win. Under `ssh.socket` (Debian moved to socket
+  activation in Trixie) systemd holds the port and no sshd is resident while
+  idle, so the idle saving is ~0 and dropbear only wins per connection
+  (~5–10 MB per sshd session vs ~1–2 MB). Step 22 detects which model your
+  image uses, says so before asking, and prints the measured before/after RSS
+  rather than assuming a win.
 - **avahi-daemon is left running on purpose.** It publishes the Pi as
   `<hostname>.local` over mDNS, so `ssh pi@raspberrypi.local` keeps working.
   Turning it off in the same run that swaps the SSH server (step 22) would mean

@@ -747,8 +747,8 @@ alias ll='ls -l'
 alias la='ls -la'
 alias edit='l3afpad'
 alias leafpad='l3afpad'
-alias hh='history’
-alias hl=‘history 20’
+alias hh='history'
+alias hl='history 20'
 
 # Oh My Posh prompt (only for interactive shells with a real terminal).
 if command -v oh-my-posh >/dev/null 2>&1 && [ -n "${PS1:-}" ]; then
@@ -1095,9 +1095,55 @@ sudo apt-get -y clean >>"$LOGFILE" 2>&1 || true
 banner "22 - SSH server: dropbear replaces OpenSSH"
 # ===========================================================================
 
+# How much this actually saves depends entirely on how OpenSSH is started:
+#
+#   ssh.service  a listener process is resident from boot (~5-8 MB RSS), and
+#                every session forks a privileged monitor plus an unprivileged
+#                child (~5-10 MB per connection).
+#   ssh.socket   systemd holds the listening socket and NO sshd is resident
+#                while idle. The idle saving from dropbear is then close to
+#                zero and the only win is the per-connection cost.
+#
+# Debian moved sshd to socket activation in Trixie; Bookworm still uses the
+# traditional service. Rather than assume, the step measures both ends and
+# prints the real numbers for this machine.
+
+# Total RSS in kB of all processes whose command matches $1.
+rss_of() {
+    ps -eo rss,comm --no-headers 2>/dev/null \
+        | awk -v pat="$1" '$2 ~ pat { total += $1 } END { print total + 0 }'
+}
+
+SSHD_RSS_BEFORE="$(rss_of '^sshd$')"
+SSH_ACTIVATION="none"
+if systemctl is-active ssh.socket >/dev/null 2>&1 || \
+   systemctl is-enabled ssh.socket >/dev/null 2>&1; then
+    SSH_ACTIVATION="socket"
+elif systemctl is-active ssh.service >/dev/null 2>&1 || \
+     systemctl is-enabled ssh.service >/dev/null 2>&1; then
+    SSH_ACTIVATION="service"
+fi
+
 if [ "$SKIP_SSH_SWAP" = "1" ]; then
     print_warning "SKIP_SSH_SWAP=1 -> keeping OpenSSH, dropbear not installed."
 else
+    case "$SSH_ACTIVATION" in
+        service)
+            print_status "OpenSSH runs as a resident daemon (ssh.service): ${SSHD_RSS_BEFORE} kB RSS now."
+            print_status "Dropbear should take this to roughly 1000-2000 kB."
+            ;;
+        socket)
+            print_status "OpenSSH is socket-activated (ssh.socket): systemd holds the port and"
+            print_status "no sshd is resident while idle, so the idle saving here is ~0."
+            print_warning "The win is per-connection only: ~5-10 MB per sshd session against"
+            print_warning "~1-2 MB per dropbear session. Swap for the per-session cost, or keep"
+            print_warning "OpenSSH with SKIP_SSH_SWAP=1 if you would rather have its feature set."
+            ;;
+        none)
+            print_warning "No OpenSSH server unit found; installing dropbear as the SSH server."
+            ;;
+    esac
+
     print_warning "About to replace OpenSSH with dropbear on port 22."
     print_warning "If you are connected over SSH right now, your session may drop."
     print_warning "Reconnect afterwards with the same user, password or ~/.ssh/authorized_keys."
@@ -1122,8 +1168,9 @@ DROPBEAR_BANNER=""
 DROPBEAR_RECEIVE_WINDOW=65536
 EOF
 
-            print_status "Stopping and disabling OpenSSH..."
-            for unit in ssh.socket ssh.service sshd.service; do
+            # Both activation paths must go, whichever this release uses.
+            print_status "Stopping and disabling OpenSSH (service and socket units)..."
+            for unit in ssh.socket ssh.service sshd.service sshd.socket; do
                 systemctl list-unit-files 2>/dev/null | grep -q "^${unit}" && \
                     sudo systemctl disable --now "$unit" >>"$LOGFILE" 2>&1
             done
@@ -1141,7 +1188,25 @@ EOF
                 else
                     print_warning "Could not purge openssh-server (see $LOGFILE)."
                 fi
-                # The client stays: scp/ssh out of the Pi still work.
+
+                # openssh-client is kept on purpose. It is not a daemon, so it
+                # costs no resident memory, and ssh/scp/sftp/ssh-keygen out of
+                # the Pi keep working - git, rsync and ansible all invoke
+                # /usr/bin/ssh by name and dbclient is not a drop-in for it.
+                print_status "openssh-client kept: no resident cost, and ssh/scp out of the Pi still work."
+
+                DROPBEAR_RSS="$(rss_of '^dropbear')"
+                SSHD_RSS_AFTER="$(rss_of '^sshd$')"
+                print_status " "
+                print_status "  Measured on this machine:"
+                print_status "    sshd resident before : ${SSHD_RSS_BEFORE} kB"
+                print_status "    sshd resident after  : ${SSHD_RSS_AFTER} kB"
+                print_status "    dropbear resident    : ${DROPBEAR_RSS} kB"
+                if [ "$SSH_ACTIVATION" = "socket" ]; then
+                    print_status "    (sshd was socket-activated, so 'before' was already ~0;"
+                    print_status "     the saving shows up per connection, not at idle.)"
+                fi
+                print_status " "
             else
                 note_fail "Nothing is listening on port 22 - keeping OpenSSH installed."
                 for unit in ssh.socket ssh.service; do

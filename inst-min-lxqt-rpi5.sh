@@ -423,7 +423,7 @@ UI_FONT="$(detect_family \
     'Ubuntu Nerd Font' 'UbuntuSans Nerd Font' \
     'UbuntuMono Nerd Font' 'DejaVu Sans')" || UI_FONT="sans-serif"
 
-FONT_SIZE=11
+FONT_SIZE=12
 print_status "UI font   : ${UI_FONT} ${FONT_SIZE}"
 print_status "Mono font : ${MONO_FONT} ${FONT_SIZE}"
 

@@ -58,6 +58,9 @@ SKIP_PI_APPS="${SKIP_PI_APPS:-0}"
 SKIP_TRIM="${SKIP_TRIM:-0}"
 ASSUME_YES="${ASSUME_YES:-0}"
 
+# Interface font size, applied to Qt/LXQt, GTK, Openbox and urxvt alike.
+FONT_SIZE=12
+
 # Desktop background colour requested: R:56 G:60 B:72
 BG_COLOR="#383C48"
 BG_DARKER="#2B2E38"
@@ -371,7 +374,7 @@ chmod +x "$HOME/.local/bin/screenrec"
 print_status "Installed screen recorder: ~/.local/bin/screenrec (run again to stop)"
 
 # ===========================================================================
-banner "09 - Ubuntu Nerd Font (system-wide, regular, size 11)"
+banner "09 - Ubuntu Nerd Font (system-wide, regular, size ${FONT_SIZE})"
 # ===========================================================================
 
 NF_DIR="/usr/local/share/fonts/NerdFonts"
@@ -423,7 +426,6 @@ UI_FONT="$(detect_family \
     'Ubuntu Nerd Font' 'UbuntuSans Nerd Font' \
     'UbuntuMono Nerd Font' 'DejaVu Sans')" || UI_FONT="sans-serif"
 
-FONT_SIZE=12
 print_status "UI font   : ${UI_FONT} ${FONT_SIZE}"
 print_status "Mono font : ${MONO_FONT} ${FONT_SIZE}"
 

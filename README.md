@@ -161,14 +161,6 @@ release. Note this ran on an x86 Ubuntu container, **not** on a Pi:
 - **Openbox was actually started under Xvfb** with the generated theme, rc.xml
   and menu.xml, and came up with no warnings or errors.
 
-A sixth surfaced on first real hardware: step 22 hardcoded
-`systemctl enable --now dropbear`, which does not exist on releases that ship
-`dropbear.socket`, and the "is anything listening on :22" test that followed
-passed on a lingering `sshd` — so OpenSSH could be purged while dropbear had
-never started, leaving no SSH server at all. The step now detects the real unit
-and requires dropbear to be active AND the `:22` listener not to be sshd before
-purging anything.
-
 Five real bugs were found and fixed this way: an unquoted `#` in a `.desktop`
 `Exec` (a reserved character the spec rejects), a dangling
 `/var/lib/openbox/debian-menu.xml` reference inherited from Debian's stock
@@ -179,9 +171,30 @@ typographic quotes (U+2018/U+2019), which bash cannot parse — the generated
 `~/.bashrc` aborted at that line and everything below it, including the
 oh-my-posh prompt block, silently never ran.
 
-**Not verified:** no step was run against Raspberry Pi OS on real Pi 5
-hardware. Package availability was confirmed from the Debian and Raspberry Pi
-archives, but the first real run is still the first real run.
+### What the first hardware run found
+
+The script has since been run on Raspberry Pi OS (Trixie, arm64) on a Pi 5. It
+completed, with a single failure — step 22, `Failed to enable unit: Unit
+dropbear.service does not exist` — which took three attempts to diagnose
+correctly:
+
+1. Guessed socket activation. Wrong: no `dropbear.socket` existed.
+2. Guessed a unit-naming difference and required a unit file to be present.
+   Worse — that would have reported failure on a sysvinit-only layout where
+   dropbear was serving perfectly well.
+3. The install log settled it: only `dropbear-bin`, `libtomcrypt1` and
+   `libtommath1` were installed. `dropbear-run` was dropped from Debian in
+   2022.83-3 and the `dropbear` package now ships the startup files, so nothing
+   provided a service. The binary-presence probe passed and hid it.
+
+Two fixes came out of that, both worth keeping: the step decides from **which
+process owns port 22** rather than from a command's exit status, and it
+verifies a service or init script exists before touching OpenSSH at all.
+
+**Still not verified:** the fixes made after that run have not themselves been
+re-run on hardware, and the Bookworm-only fallback paths — the vimb source
+build and the fastfetch `.deb` download — stay untested, since Trixie packages
+both.
 
 ## After install
 

@@ -1027,7 +1027,7 @@ print_status "Background set to ${BG_COLOR} via xsetroot (no wallpaper, no deskt
 # ===========================================================================
 banner "20 - Pi-Apps (64-bit) plus 'Min' and 'Geany Dark Mode'"
 # ===========================================================================
-sudo apt install -y --no-install-recommends geany
+
 if [ "$SKIP_PI_APPS" = "1" ]; then
     print_warning "SKIP_PI_APPS=1 -> skipping Pi-Apps."
 else
@@ -1045,7 +1045,23 @@ else
     if [ -x "$HOME/pi-apps/manage" ]; then
         print_warning "'Min' is an Electron browser (~250-400 MB RSS when open) - it is the"
         print_warning "heaviest thing in this build. Vimb remains the low-memory browser."
+
+        # 'Geany Dark Mode' only recolours an existing Geany: it writes theme
+        # files into Geany's config and does nothing to install the editor, so
+        # it fails outright when geany is absent. Install it first, and treat
+        # it as an ordered prerequisite rather than a separate feature.
+        if command -v geany >/dev/null 2>&1; then
+            print_status "geany already present (prerequisite for 'Geany Dark Mode')."
+        else
+            print_status "Installing geany first - 'Geany Dark Mode' needs it to exist."
+            apt_install geany
+        fi
+
         for app in "Min" "Geany Dark Mode"; do
+            if [ "$app" = "Geany Dark Mode" ] && ! command -v geany >/dev/null 2>&1; then
+                note_fail "Skipped '${app}': geany is missing, so the theme has nothing to apply to."
+                continue
+            fi
             print_status "Pi-Apps: installing '${app}'..."
             if "$HOME/pi-apps/manage" install "$app" >>"$LOGFILE" 2>&1; then
                 print_status "Pi-Apps app installed: ${app}"

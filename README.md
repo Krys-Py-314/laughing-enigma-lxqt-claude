@@ -42,7 +42,7 @@ logged to `~/inst-min-lxqt-rpi5.log`.
 | SSH | dropbear replaces OpenSSH | ~1 MB resident vs ~8 MB |
 | Prompt | oh-my-posh | Requested |
 | Dev | gcc, g++, make, libgpiod, raspi-utils-core, git, curl | See GPIO note below |
-| Editor (dev) | geany | Installed explicitly in step 20 so the Pi-Apps "Geany Dark Mode" theme has something to theme |
+| Editor (dev) | geany | Installed in step 20 as an ordered prerequisite: "Geany Dark Mode" only recolours an existing Geany and fails without it |
 
 Printing is pinned out entirely (`Pin-Priority: -1` on cups and
 `printer-driver-*`), and `APT::Install-Recommends "false"` is set so nothing
@@ -98,6 +98,12 @@ pulls in a print stack or other optional weight by accident.
   (~5–10 MB per sshd session vs ~1–2 MB). Step 22 detects which model your
   image uses, says so before asking, and prints the measured before/after RSS
   rather than assuming a win.
+- **`Geany Dark Mode` needs Geany installed first.** The Pi-Apps app only
+  writes theme files into Geany's config — it does not install the editor, and
+  fails outright when it is absent. Step 20 installs `geany` before the
+  Pi-Apps loop and skips the theme with a clear message if that install did not
+  succeed, rather than letting Pi-Apps fail opaquely. Both live inside the
+  `SKIP_PI_APPS` guard, so skipping Pi-Apps skips geany too.
 - **avahi-daemon is left running on purpose.** It publishes the Pi as
   `<hostname>.local` over mDNS, so `ssh pi@raspberrypi.local` keeps working.
   Turning it off in the same run that swaps the SSH server (step 22) would mean

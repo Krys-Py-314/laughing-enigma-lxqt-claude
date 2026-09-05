@@ -104,6 +104,13 @@ pulls in a print stack or other optional weight by accident.
   Pi-Apps loop and skips the theme with a clear message if that install did not
   succeed, rather than letting Pi-Apps fail opaquely. Both live inside the
   `SKIP_PI_APPS` guard, so skipping Pi-Apps skips geany too.
+- **`dropbear-run` no longer exists.** It was dropped from Debian in dropbear
+  2022.83-3; on Trixie the `dropbear` package itself ships the startup files.
+  `dropbear-bin` provides `/usr/sbin/dropbear` and *nothing that starts it*, so
+  installing only that leaves a machine with the binary present, no init
+  script, and no SSH server after the next reboot. Step 22 installs `dropbear`
+  plus `dropbear-bin`, falls back to `dropbear-run` for older releases, and
+  refuses to touch OpenSSH unless a service or init script actually exists.
 - **dropbear's init layout varies by release**, and `systemctl enable` behaves
   differently on each: `dropbear.socket` + `dropbear@.service` (socket
   activated), a plain `dropbear.service`, or just `/etc/init.d/dropbear` wrapped

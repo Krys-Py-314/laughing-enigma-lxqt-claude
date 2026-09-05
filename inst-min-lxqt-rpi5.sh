@@ -1130,6 +1130,14 @@ rss_of() {
         | awk -v pat="$1" '$2 ~ pat { total += $1 } END { print total + 0 }'
 }
 
+# True when something can actually start dropbear at boot: a systemd unit or
+# a sysvinit script. dropbear-bin alone satisfies neither.
+dropbear_service_present() {
+    [ -x /etc/init.d/dropbear ] && return 0
+    systemctl list-unit-files 2>/dev/null | grep -qE '^dropbear\.(service|socket)' && return 0
+    return 1
+}
+
 SSHD_RSS_BEFORE="$(rss_of '^sshd$')"
 SSH_ACTIVATION="none"
 if systemctl is-active ssh.socket >/dev/null 2>&1 || \
@@ -1165,14 +1173,24 @@ else
     print_warning "Reconnect afterwards with the same user, password or ~/.ssh/authorized_keys."
     if confirm "Proceed with the OpenSSH -> dropbear swap?"; then
 
-        # apt_install succeeds when a package is merely absent, so probe for the
-        # binary itself rather than trusting the return code.
-        apt_install dropbear-run dropbear-bin
-        if [ ! -x /usr/sbin/dropbear ]; then
-            apt_install dropbear
+        # The Debian package split changed: dropbear-run was dropped in
+        # 2022.83-3, and the 'dropbear' package itself now ships the startup
+        # files. dropbear-bin provides /usr/sbin/dropbear and NOTHING that
+        # starts it, so probing for the binary is not enough - a machine can
+        # end up with the binary present, no init script, and therefore no SSH
+        # server after a reboot. Probe for the service instead.
+        apt_install dropbear dropbear-bin
+        if ! dropbear_service_present; then
+            # Older releases keep the startup files in dropbear-run.
+            apt_install dropbear-run
         fi
 
-        if [ -x /usr/sbin/dropbear ]; then
+        if [ ! -x /usr/sbin/dropbear ]; then
+            note_fail "dropbear binary missing after install; OpenSSH left in place."
+        elif ! dropbear_service_present; then
+            note_fail "dropbear installed but nothing provides its service or init script."
+            print_warning "It would not start at boot, so OpenSSH is being left in place."
+        else
 
             # Used by the dropbear.service path. Under dropbear.socket the port
             # comes from the unit's ListenStream (22 by default) and this file
@@ -1307,8 +1325,6 @@ EOF
                 done
                 print_warning "OpenSSH was re-enabled so you are not locked out."
             fi
-        else
-            note_fail "dropbear packages unavailable; OpenSSH left in place."
         fi
     else
         print_warning "Skipped by user; OpenSSH left in place."

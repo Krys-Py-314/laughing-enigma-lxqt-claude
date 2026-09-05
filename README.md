@@ -196,6 +196,61 @@ re-run on hardware, and the Bookworm-only fallback paths — the vimb source
 build and the fastfetch `.deb` download — stay untested, since Trixie packages
 both.
 
+## Second pass: `inst_dark_theme_and_icons.sh`
+
+Run **after** `inst-min-lxqt-rpi5.sh` to apply a dark theme, Papirus icons and
+a configured panel:
+
+```bash
+chmod +x inst_dark_theme_and_icons.sh
+./inst_dark_theme_and_icons.sh
+```
+
+| Variable | Effect |
+|---|---|
+| `NO_DESKTOP=1` | Do not enable the PCManFM-Qt desktop process |
+| `ASSUME_YES=1` | Never prompt (unattended run) |
+
+| Setting | Value |
+|---|---|
+| GTK 2 / GTK 3 | Arc-Dark, `prefer-dark` on |
+| Icons | Papirus-Dark |
+| Qt widget style | `kvantum-dark`, dark Kvantum engine theme auto-selected |
+| LXQt theme | `kvantum` (shipped by `lxqt-themes`) |
+| Openbox | generated `Arc-Dark-Square` — square 1px borders |
+| Font | Ubuntu Nerd Font 10, Normal |
+| Panel | 48 px tall, 38 px icons, bottom, raspberry menu icon |
+| Desktop | PCManFM-Qt, 48×48 icons, Sans 11 labels, white on `#383C48` |
+
+### Three things the spec asked for that needed a decision
+
+1. **`arc-theme` ships no Openbox theme** — only GTK2/3/4, metacity and xfwm4.
+   So "Openbox borders in Arc-Dark" cannot be done by installing it. The script
+   generates `Arc-Dark-Square` from Arc-Dark's own palette instead.
+2. **Arc-Dark does not vary the titlebar background** between active and
+   inactive — it uses `#2F343F` for both and distinguishes them by text colour.
+   The requested "dark active, very dark inactive" therefore uses two authentic
+   Arc-Dark values: `#383C4A` (background) active, `#2F343F` (headerbar)
+   inactive, so nothing clashes with the GTK theme.
+3. **The icon theme was specified twice, differently** — "Papirus black dark"
+   in one place, "Numix Circle" in the Config Center block. Papirus-Dark is
+   applied; Numix-Circle stays installed and selectable in `lxqt-config`.
+
+### Other notes
+
+- **`lxqt-panel` has no separator plugin.** Each requested "Separator" is a
+  fixed 8 px `spacer`, which is the conventional stand-in.
+- **Debian ships no `.desktop` file for urxvt**, so the script writes one into
+  `~/.local/share/applications/` for the Quick Launch entry.
+- **Enabling the desktop reverses a base-script decision.** `inst-min-lxqt-rpi5.sh`
+  deliberately ran no desktop process and painted the background with
+  `xsetroot`. Desktop icons cost roughly 30–45 MB RSS; `NO_DESKTOP=1` keeps the
+  lighter arrangement and just writes the settings.
+- **Run it from a TTY if you can.** LXQt rewrites `lxqt.conf` and `panel.conf`
+  when the session exits, so editing them under a live session means logout
+  reverts the changes. The script detects a running session and warns.
+- `rc.xml` and `panel.conf` are backed up with a timestamp before being changed.
+
 ## After install
 
 ```bash

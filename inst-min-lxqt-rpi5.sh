@@ -845,6 +845,10 @@ EOF
 
 # pcmanfm-qt: keep it as a file manager only, and if its desktop is ever
 # enabled make sure it paints the requested flat colour and no wallpaper.
+# The file manager's view mode and hidden-file filter live in [FolderView]
+# under the key "Mode". "ViewMode" in [Window] is not a pcmanfm-qt key at all:
+# QSettings preserves it on rewrite, so it looks accepted while doing nothing.
+# [Desktop] ShowHidden covers the desktop, [FolderView] ShowHidden the windows.
 mkdir -p "$HOME/.config/pcmanfm-qt/lxqt"
 cat >"$HOME/.config/pcmanfm-qt/lxqt/settings.conf" <<EOF
 [Desktop]
@@ -852,7 +856,7 @@ Wallpaper=
 WallpaperMode=color
 BgColor=${BG_COLOR}
 FgColor=${FG_COLOR}
-ShowHidden=false
+ShowHidden=true
 DesktopIconSize=48
 
 [Behavior]
@@ -862,7 +866,10 @@ ConfirmDelete=true
 [Window]
 AlwaysShowTabs=false
 ShowMenuBar=true
-ViewMode=icon
+
+[FolderView]
+Mode=detailed
+ShowHidden=true
 EOF
 print_status "LXQt configured (icons: ${ICON_THEME}, font: ${UI_FONT} ${FONT_SIZE})."
 

@@ -225,6 +225,7 @@ Output is logged to `~/inst_dark_theme_and_icons.log`.
 | Panel | 32 px tall, 22 px icons, bottom, raspberry menu icon |
 | Tray applets | lxqt-powermanagement, nm-applet, qlipper, lxqt-notificationd |
 | Desktop | PCManFM-Qt, 48×48 icons, Sans 11 labels, white on `#383C48` |
+| File manager | detailed list view, hidden files shown |
 
 ### Three things the spec asked for that needed a decision
 
@@ -288,6 +289,13 @@ mode as the Arc-Dark problem above. Verify with
   supports. The `font` key written for `kbindicator` is best-effort: if your
   version ignores it, the only other lever is the LXQt Qt font, which resizes
   every panel plugin at once.
+- **pcmanfm-qt's view mode key is `Mode` in `[FolderView]`**, not `ViewMode` in
+  `[Window]`. The latter is not a pcmanfm-qt key at all — QSettings preserves
+  unknown keys when it rewrites the file, so it survives in `settings.conf` and
+  looks accepted while doing nothing. An earlier version of the base script set
+  exactly that and had no effect. Hidden files are split in two: `[Desktop]
+  ShowHidden` for the desktop, `[FolderView] ShowHidden` for file manager
+  windows; both are now `true`.
 - **`lxqt-panel` has no separator plugin.** Each requested "Separator" is a
   fixed 8 px `spacer`, which is the conventional stand-in.
 - **Debian ships no `.desktop` file for urxvt**, so the script writes one into

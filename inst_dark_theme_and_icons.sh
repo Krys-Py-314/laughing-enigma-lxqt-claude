@@ -500,10 +500,17 @@ ini_set "$PCM" Desktop ShadowColor "${DESKTOP_SHADOW}"
 ini_set "$PCM" Desktop Font "\"${DESKTOP_LABEL_FONT},${DESKTOP_LABEL_SIZE},-1,5,50,0,0,0,0,0\""
 ini_set "$PCM" Desktop DesktopIconSize 48
 ini_set "$PCM" Desktop DesktopCellMargins "@Size(3 1)"
-ini_set "$PCM" Desktop ShowHidden false
+ini_set "$PCM" Desktop ShowHidden true
 ini_set "$PCM" Behavior SingleClick false
+
+# Detailed list view and hidden files in the file manager itself. The key is
+# "Mode" in [FolderView]: "ViewMode" in [Window] is not a pcmanfm-qt key and
+# is silently ignored. [Desktop] ShowHidden above only affects the desktop.
+ini_set "$PCM" FolderView Mode detailed
+ini_set "$PCM" FolderView ShowHidden true
 print_status "Desktop: 48x48 icons, ${DESKTOP_LABEL_FONT} ${DESKTOP_LABEL_SIZE} labels,"
 print_status "         white text on ${DESKTOP_SHADOW} shadow, 3px x 1px margins."
+print_status "Files:   detailed list view, hidden files shown."
 
 if [ "$NO_DESKTOP" = "1" ]; then
     print_warning "NO_DESKTOP=1 -> desktop process not enabled; settings written only."

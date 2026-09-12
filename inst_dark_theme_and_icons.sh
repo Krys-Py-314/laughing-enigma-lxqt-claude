@@ -578,6 +578,20 @@ EOF
     print_status "Created a Terminal .desktop for urxvt (Debian ships none)."
 fi
 
+# Fancy Menu (LXQt 2.0+) draws categories as a column beside the application
+# list and exposes a position setting for it. The classic mainmenu has no
+# layout option at all - its categories are hover submenus, full stop - so
+# prefer fancymenu wherever the panel ships it. Plugins register themselves
+# with a .desktop file, which is what makes this detectable.
+if [ -f /usr/share/lxqt/lxqt-panel/fancymenu.desktop ]; then
+    MENU_PLUGIN="fancymenu"
+    print_status "Using the Fancy Menu plugin (categories in a left column)."
+else
+    MENU_PLUGIN="mainmenu"
+    print_warning "Fancy Menu not available (needs LXQt 2.0+); using the classic"
+    print_warning "mainmenu, whose categories can only be hover submenus."
+fi
+
 # lxqt-panel has no dedicated separator plugin; a small fixed spacer is the
 # conventional stand-in, so each requested "Separator" becomes one.
 cat >"$PANEL" <<EOF
@@ -593,17 +607,20 @@ iconSize=${PANEL_ICON_SIZE}
 lineCount=1
 lockPanel=false
 panelSize=${PANEL_HEIGHT}
-plugins=mainmenu, showdesktop, desktopswitch, sep1, quicklaunch, sep2, taskbar, sep3, kbindicator, sep4, tray, statusnotifier, mount, volume, worldclock, quicklaunch2
+plugins=${MENU_PLUGIN}, showdesktop, desktopswitch, sep1, quicklaunch, sep2, taskbar, sep3, kbindicator, sep4, tray, statusnotifier, mount, volume, worldclock, quicklaunch2
 position=Bottom
 show-delay=0
 visibleMargin=true
 width=100
 width-percent=true
 
-[mainmenu]
-type=mainmenu
+[${MENU_PLUGIN}]
+type=${MENU_PLUGIN}
+ownIcon=true
 icon=${RASPBERRY_ICON}
 showText=false
+categoriesAtRight=false
+buttonsAtTop=false
 
 [showdesktop]
 type=showdesktop

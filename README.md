@@ -223,6 +223,7 @@ Output is logged to `~/inst_dark_theme_and_icons.log`.
 | Openbox | generated `Arc-Dark-Square` — square 1px borders |
 | Font | Ubuntu Nerd Font 10, Normal |
 | Panel | 32 px tall, 22 px icons, bottom, raspberry menu icon |
+| Menu | Fancy Menu, categories in a left column (falls back to `mainmenu`) |
 | Tray applets | lxqt-powermanagement, nm-applet, qlipper, lxqt-notificationd |
 | Desktop | PCManFM-Qt, 48×48 icons, Sans 11 labels, white on `#383C48` |
 | File manager | detailed list view, hidden files shown |
@@ -296,6 +297,18 @@ mode as the Arc-Dark problem above. Verify with
   exactly that and had no effect. Hidden files are split in two: `[Desktop]
   ShowHidden` for the desktop, `[FolderView] ShowHidden` for file manager
   windows; both are now `true`.
+- **Categories on the left needs the Fancy Menu plugin, not a setting.** The
+  classic `mainmenu` has no layout option whatsoever — its settings cover icon,
+  button text, font size, menu file, shortcut and search, and its categories
+  are always hover submenus. `fancymenu` (LXQt 2.0+, the default menu since
+  LXQt 2.0) draws categories as a column and exposes `categoriesAtRight`
+  (`false` = left) and `buttonsAtTop`. The script prefers `fancymenu` when
+  `/usr/share/lxqt/lxqt-panel/fancymenu.desktop` exists and falls back to
+  `mainmenu` with a warning otherwise.
+- **A custom menu icon needs `ownIcon=true`, not just `icon=`.** Both menu
+  plugins gate the icon path behind that boolean, so setting `icon` alone is
+  silently ignored and the default icon stays. An earlier version of this
+  script did exactly that.
 - **`lxqt-panel` has no separator plugin.** Each requested "Separator" is a
   fixed 8 px `spacer`, which is the conventional stand-in.
 - **Debian ships no `.desktop` file for urxvt**, so the script writes one into

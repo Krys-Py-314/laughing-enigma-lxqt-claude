@@ -301,6 +301,66 @@ mode as the Arc-Dark problem above. Verify with
   reverts the changes. The script detects a running session and warns.
 - `rc.xml` and `panel.conf` are backed up with a timestamp before being changed.
 
+## FeatherPad: `conf_featherpad.sh`
+
+Configures FeatherPad. Standalone — it does not depend on the other two
+scripts.
+
+```bash
+chmod +x conf_featherpad.sh
+./conf_featherpad.sh
+```
+
+| Variable | Effect |
+|---|---|
+| `BG_VALUE=<0-50>` | Dark background shade (default 40) |
+| `ASSUME_YES=1` | Never prompt (unattended run) |
+
+Writes to **`~/.config/featherpad/fp.conf`**:
+
+| Section | Key | Value |
+|---|---|---|
+| `[text]` | `lineNumbers` | `true` |
+| `[text]` | `darkColorScheme` | `true` |
+| `[text]` | `darkBgColorValue` | `40` (range 0–50, 0 blackest) |
+| `[window]` | `sysIcons` | `true` |
+
+### Two gotchas, both found by testing rather than reading
+
+1. **The section names are lowercase** — `[text]` and `[window]`. Capitalised
+   `[Text]`/`[Window]` sections are *silently ignored*: FeatherPad creates its
+   own lowercase sections, fills them with defaults, and the settings look
+   written while nothing changes. The first version of this script had it wrong
+   and appeared to succeed.
+2. **Booleans are `true`/`false`, never `yes`/`no`** — QSettings' INI format.
+
+### Two requested settings do not exist
+
+Checked against FeatherPad's `config.cpp` and `filedialog.h`:
+
+- **"default view = detailed list"** — FeatherPad hardcodes
+  `setViewMode(QFileDialog::Detail)`. It is *already* detailed list, and there
+  is no key to change it.
+- **"show hidden files"** — kept in a static variable for the lifetime of the
+  process, never written to any config file. Toggle with `Ctrl+H` (or `Alt+.`)
+  inside a dialog; it resets when FeatherPad quits.
+
+Both are file-dialog behaviours. The equivalent *file manager* settings belong
+to pcmanfm-qt, in `~/.config/pcmanfm-qt/lxqt/settings.conf`.
+
+### Verification
+
+The script was run as a non-root user against a seeded `fp.conf`, then
+**FeatherPad itself was launched under Xvfb and closed**, and the file it wrote
+back was inspected. That round trip is what proved the keys are honoured — and
+what exposed the capitalisation bug. Also checked: unrelated existing settings
+survive, keys are never duplicated across repeat runs, a missing `fp.conf` is
+created correctly, and `BG_VALUE` rejects out-of-range and non-numeric input.
+
+FeatherPad rewrites its whole config on exit, so the script refuses to run
+while FeatherPad is open and offers to close it first. Existing configs are
+backed up with a timestamp.
+
 ## After install
 
 ```bash

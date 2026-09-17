@@ -369,6 +369,18 @@ Checked against FeatherPad's `config.cpp` and `filedialog.h`:
 Both are file-dialog behaviours. The equivalent *file manager* settings belong
 to pcmanfm-qt, in `~/.config/pcmanfm-qt/lxqt/settings.conf`.
 
+### It merges, it does not overwrite
+
+An existing `fp.conf` is **updated in place**: only the four keys above change.
+Fonts, tab size, shortcuts, syntax colours, recent files, window geometry and
+everything else are left exactly as they were, ordering and blank lines
+included. If no `fp.conf` exists, one is created containing just those four
+keys and FeatherPad fills in its own defaults for the rest. A timestamped
+backup is taken before any change regardless.
+
+Demonstrated by diffing a 31-line, 4-section config before and after: only the
+four intended lines differ, and the line and section counts are unchanged.
+
 ### Verification
 
 The script was run as a non-root user against a seeded `fp.conf`, then

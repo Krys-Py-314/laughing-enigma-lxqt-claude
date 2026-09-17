@@ -115,7 +115,9 @@ for line in lines:
 if in_sec and not done:
     out.append('%s=%s' % (key, value)); done = True
 if not seen_sec:
-    if out and out[-1].strip():
+    while out and not out[-1].strip():
+        out.pop()
+    if out:
         out.append('')
     out.append('[%s]' % section)
     out.append('%s=%s' % (key, value))
@@ -196,14 +198,17 @@ mkdir -p "$(dirname "$FP_CONF")"
 if [ -f "$FP_CONF" ]; then
     BACKUP="${FP_CONF}.bak-$(date +%Y%m%d%H%M%S)"
     cp -f "$FP_CONF" "$BACKUP"
-    print_status "Existing config backed up to: $BACKUP"
+    print_status "Existing config found; it will be UPDATED IN PLACE."
+    print_status "Only the four keys below change - fonts, tab size, shortcuts,"
+    print_status "syntax colours, recent files and everything else are preserved."
+    print_status "Backup taken anyway: $BACKUP"
 else
-    print_status "No existing fp.conf; a new one will be created."
-    print_status "FeatherPad fills in its own defaults for everything not set here."
+    print_status "No existing fp.conf; a new one will be created with just these"
+    print_status "four keys. FeatherPad fills in its own defaults for the rest."
 fi
 
 # ===========================================================================
-banner "03 - Applying the settings"
+banner "03 - Applying the settings (in place, nothing else touched)"
 # ===========================================================================
 
 # Two things here are load-bearing and were both verified by writing a config,

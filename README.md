@@ -402,3 +402,25 @@ sudo reboot          # or: startx
 free -h
 ps -eo rss,comm --sort=-rss | head -20
 ```
+
+# inst-lgpio-rpi5.sh
+
+Installs the [lgpio](https://abyz.me.uk/lg/) GPIO library (C library and
+Python 3 module) on a **Raspberry Pi 5** running **Debian 13 Trixie**, starting
+from a bare system.
+
+```bash
+chmod +x inst-lgpio-rpi5.sh
+./inst-lgpio-rpi5.sh
+```
+
+It installs `liblgpio1`, `liblgpio-dev` and `python3-lgpio` from apt when
+available. If they aren't, it builds [joan2937/lg](https://github.com/joan2937/lg)
+from source into `/usr/local`. It also adds you to a `gpio` group and installs
+a udev rule so `/dev/gpiochip*` works without sudo once you log in again.
+
+| Variable | Effect |
+|---|---|
+| `FROM_SOURCE=1` | Always build from source instead of using apt |
+| `LG_REF=<branch>` | Upstream branch to build (default `master`) |
+| `SKIP_PYTHON=1` | Install only the C library |

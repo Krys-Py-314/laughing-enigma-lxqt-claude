@@ -394,6 +394,32 @@ FeatherPad rewrites its whole config on exit, so the script refuses to run
 while FeatherPad is open and offers to close it first. Existing configs are
 backed up with a timestamp.
 
+## Hide "QTerminal drop down": `hide_qterminal_drop.sh`
+
+Removes the **QTerminal drop down** entry from **System Tools** in the panel's
+Fancy Menu. The normal *QTerminal* entry stays. Standalone.
+
+```bash
+chmod +x hide_qterminal_drop.sh
+./hide_qterminal_drop.sh            # current user only
+./hide_qterminal_drop.sh --system   # all users (uses sudo)
+./hide_qterminal_drop.sh --undo     # show it again (add --system if hidden system-wide)
+```
+
+The entry comes from `/usr/share/applications/qterminal-drop.desktop`, owned by
+the `qterminal` package. That file is **not** edited or deleted, because the next
+`apt upgrade` of qterminal would put it back. Instead, a copy with
+`NoDisplay=true` is written to a directory the XDG menu spec searches first:
+`~/.local/share/applications/` (per user) or `/usr/local/share/applications/`
+(`--system`). A file ID in those directories overrides the packaged file with
+the same name, so the menu hides the entry. `qterminal --drop` still works from a
+shortcut or terminal. `--undo` only removes a file this script created.
+
+The menu usually updates straight away. If it does not, log out and back in.
+
+Verified with a freedesktop menu parser (pyxdg): the entry is listed under
+`System` before the script runs, absent after, and back after `--undo`.
+
 ## After install
 
 ```bash
@@ -402,3 +428,25 @@ sudo reboot          # or: startx
 free -h
 ps -eo rss,comm --sort=-rss | head -20
 ```
+
+# inst-lgpio-rpi5.sh
+
+Installs the [lgpio](https://abyz.me.uk/lg/) GPIO library (C library and
+Python 3 module) on a **Raspberry Pi 5** running **Debian 13 Trixie**, starting
+from a bare system.
+
+```bash
+chmod +x inst-lgpio-rpi5.sh
+./inst-lgpio-rpi5.sh
+```
+
+It installs `liblgpio1`, `liblgpio-dev` and `python3-lgpio` from apt when
+available. If they aren't, it builds [joan2937/lg](https://github.com/joan2937/lg)
+from source into `/usr/local`. It also adds you to a `gpio` group and installs
+a udev rule so `/dev/gpiochip*` works without sudo once you log in again.
+
+| Variable | Effect |
+|---|---|
+| `FROM_SOURCE=1` | Always build from source instead of using apt |
+| `LG_REF=<branch>` | Upstream branch to build (default `master`) |
+| `SKIP_PYTHON=1` | Install only the C library |

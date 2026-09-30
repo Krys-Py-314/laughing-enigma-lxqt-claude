@@ -1,20 +1,57 @@
-# inst-min-lxqt-rpi5.sh
+# inst-lowmem-lxqt-rpi5.sh
 
 A minimal-memory LXQt + Openbox desktop for the **Raspberry Pi 5** on top of
-**Raspberry Pi OS Lite 64-bit** (Bookworm or Trixie).
+**Raspberry Pi OS Lite 64-bit** (Bookworm or Trixie), tuned for the **2 GB**
+model. It replaces `inst-min-lxqt-rpi5.sh`: same desktop, plus the memory fixes
+described below.
 
 ```bash
-chmod +x inst-min-lxqt-rpi5.sh
-./inst-min-lxqt-rpi5.sh
+bash inst-lowmem-lxqt-rpi5.sh
 ```
 
-Run it as a **normal user with sudo rights**, not as root. Everything is
-logged to `~/.inst-min-lxqt-rpi5.log`.
+**No `sudo` needed.** Run it as your normal user; it asks for your password
+once and calls `sudo` itself where root is required, keeping the credentials
+alive for the whole run. If you do start it with `sudo`, it re-runs itself as
+your user, so all the files under `$HOME` still end up owned by you. Logging in
+as `root` itself is refused. Everything is logged to
+`~/.inst-lowmem-lxqt-rpi5.log`.
+
+## Why this script exists: Pi 5 vs Pi Zero 2 W memory
+
+The same desktop reported ~127 MB used on a Pi Zero 2 W and ~486 MB on a Pi 5.
+Most of that gap is not LXQt. It comes from how the Pi 5 is set up out of the
+box, and the script fixes each cause:
+
+| Step | Fix | Why it saves memory |
+|---|---|---|
+| 03 | `kernel=kernel8.img` in `config.txt` | The Pi 5 kernel (`kernel_2712.img`) uses 16 KB pages, so every allocation is rounded up to 16 KB. `kernel8.img` uses 4 KB pages, like the Zero 2 W. Costs a few percent of CPU speed in some workloads. |
+| 04 | zram swap (half of RAM, zstd) | Idle pages are compressed in RAM to roughly a third instead of forcing out cache or hitting the SD card. Skipped if zram is already active or `rpi-swap` manages swap. |
+| 06 | glamor off (`AccelMethod none`) | Stops Xorg loading the Mesa GPU driver and keeping GPU buffers in RAM. Raspberry Pi OS already does this on the Pi 0–3. |
+| 06 | resolution cap (default 1920x1080) | Framebuffers and window buffers scale with pixel count; 4K costs ~4x the memory of 1080p. Only ever steps a screen *down*, and only to a mode the monitor offers. |
+| 25 | `memcheck` command | Shows page size, resolution, glamor state, swap, `free -h`, the key `/proc/meminfo` lines and the top processes. |
+
+The kernel change and a freshly configured zram need a **reboot**; the script
+says so at the end. After rebooting, log in to the desktop and run `memcheck`.
+After a kernel update, run it again: the page size must still read `4096`.
+
+What turning glamor off costs: OpenGL programs, and mpv's default video output,
+render in software. A panel, terminal and file manager do not notice. Use
+`KEEP_GLAMOR=1` if you play a lot of video.
+
+The glamor option lives in `/etc/X11/xorg.conf.d/99-vc4.conf`, in the
+`OutputClass` that already selects the Pi 5's vc4 display device. A separate
+`Device` section (the manual recipe) risks Xorg picking the display-less v3d
+card and starting with no screen, so a hand-made `20-noglamor.conf` is moved
+aside to `20-noglamor.conf.disabled`.
 
 ## Flags
 
 | Variable | Effect |
 |---|---|
+| `SKIP_KERNEL4K=1` | Keep the 16 KB-page Pi 5 kernel |
+| `KEEP_GLAMOR=1` | Leave glamor (GPU acceleration in Xorg) on |
+| `MAX_RES=WxH` | Resolution cap applied at login (default `1920x1080`; `off` disables it) |
+| `SKIP_ZRAM=1` | Do not set up zram swap |
 | `SKIP_SSH_SWAP=1` | Keep OpenSSH; do not install or switch to dropbear |
 | `SKIP_PI_APPS=1`  | Skip Pi-Apps, Min and Geany Dark Mode |
 | `SKIP_TRIM=1`     | Do not disable triggerhappy |
@@ -42,7 +79,7 @@ logged to `~/.inst-min-lxqt-rpi5.log`.
 | SSH | dropbear replaces OpenSSH | ~1 MB resident vs ~8 MB |
 | Prompt | oh-my-posh | Requested |
 | Dev | gcc, g++, make, libgpiod, raspi-utils-core, git, curl | See GPIO note below |
-| Editor (dev) | geany | Installed in step 20 as an ordered prerequisite: "Geany Dark Mode" only recolours an existing Geany and fails without it |
+| Editor (dev) | geany | Installed in step 22 as an ordered prerequisite: "Geany Dark Mode" only recolours an existing Geany and fails without it |
 
 Printing is pinned out entirely (`Pin-Priority: -1` on cups and
 `printer-driver-*`), and `APT::Install-Recommends "false"` is set so nothing
@@ -95,12 +132,12 @@ pulls in a print stack or other optional weight by accident.
   swap is a real idle win. Under `ssh.socket` (Debian moved to socket
   activation in Trixie) systemd holds the port and no sshd is resident while
   idle, so the idle saving is ~0 and dropbear only wins per connection
-  (~5–10 MB per sshd session vs ~1–2 MB). Step 22 detects which model your
+  (~5–10 MB per sshd session vs ~1–2 MB). Step 24 detects which model your
   image uses, says so before asking, and prints the measured before/after RSS
   rather than assuming a win.
 - **`Geany Dark Mode` needs Geany installed first.** The Pi-Apps app only
   writes theme files into Geany's config — it does not install the editor, and
-  fails outright when it is absent. Step 20 installs `geany` before the
+  fails outright when it is absent. Step 22 installs `geany` before the
   Pi-Apps loop and skips the theme with a clear message if that install did not
   succeed, rather than letting Pi-Apps fail opaquely. Both live inside the
   `SKIP_PI_APPS` guard, so skipping Pi-Apps skips geany too.
@@ -108,24 +145,24 @@ pulls in a print stack or other optional weight by accident.
   2022.83-3; on Trixie the `dropbear` package itself ships the startup files.
   `dropbear-bin` provides `/usr/sbin/dropbear` and *nothing that starts it*, so
   installing only that leaves a machine with the binary present, no init
-  script, and no SSH server after the next reboot. Step 22 installs `dropbear`
+  script, and no SSH server after the next reboot. Step 24 installs `dropbear`
   plus `dropbear-bin`, falls back to `dropbear-run` for older releases, and
   refuses to touch OpenSSH unless a service or init script actually exists.
 - **dropbear's init layout varies by release**, and `systemctl enable` behaves
   differently on each: `dropbear.socket` + `dropbear@.service` (socket
   activated), a plain `dropbear.service`, or just `/etc/init.d/dropbear` wrapped
   by systemd — where `enable` can fail on a generated unit that starts
-  perfectly well. Step 22 therefore treats "enabled at boot" and "running now"
+  perfectly well. Step 24 therefore treats "enabled at boot" and "running now"
   as separate questions and decides success from **which process actually holds
   port 22**, not from any command's exit status. Under socket activation a
   reading of `dropbear resident: 0 kB` is correct rather than a failure.
 - **Running now is not the same as running after a reboot.** Where dropbear
   starts from a sysvinit script, systemd may refuse to `enable` it, leaving a
-  working machine with no SSH server on the next boot. Step 22 checks this
+  working machine with no SSH server on the next boot. Step 24 checks this
   separately and prints the `update-rc.d` fix if persistence is missing.
 - **avahi-daemon is left running on purpose.** It publishes the Pi as
   `<hostname>.local` over mDNS, so `ssh pi@raspberrypi.local` keeps working.
-  Turning it off in the same run that swaps the SSH server (step 22) would mean
+  Turning it off in the same run that swaps the SSH server (step 24) would mean
   reconnecting to a changed daemon at an address that no longer resolves. The
   only service the script disables is **triggerhappy**, a console hotkey daemon
   that Raspberry Pi OS enables with no triggers configured and that LXQt
@@ -173,10 +210,10 @@ oh-my-posh prompt block, silently never ran.
 
 ### What the first hardware run found
 
-The script has since been run on Raspberry Pi OS (Trixie, arm64) on a Pi 5. It
-completed, with a single failure — step 22, `Failed to enable unit: Unit
-dropbear.service does not exist` — which took three attempts to diagnose
-correctly:
+The original `inst-min-lxqt-rpi5.sh` has since been run on Raspberry Pi OS
+(Trixie, arm64) on a Pi 5. It completed, with a single failure — step 22 (now
+step 24), `Failed to enable unit: Unit dropbear.service does not exist` — which
+took three attempts to diagnose correctly:
 
 1. Guessed socket activation. Wrong: no `dropbear.socket` existed.
 2. Guessed a unit-naming difference and required a unit file to be present.
@@ -196,9 +233,31 @@ re-run on hardware, and the Bookworm-only fallback paths — the vimb source
 build and the fastfetch `.deb` download — stay untested, since Trixie packages
 both.
 
+### The low-memory additions (`inst-lowmem-lxqt-rpi5.sh`)
+
+Checked in the same x86 container, **not yet on a Pi**:
+
+- `bash -n` clean; `shellcheck` adds nothing beyond the SC2024/SC2088 pattern
+  above. The two generated helpers (`cap-resolution`, `memcheck`) are
+  shellcheck-clean.
+- `cap-resolution` against recorded `xrandr` output: a 4K + 1080p pair steps
+  only the 4K output down; a 1366x768 screen is left alone, and so is its
+  interlaced `1920x1080i` mode; a 4K monitor with no 1080p mode is left alone;
+  `off` does nothing.
+- The `config.txt` block writer, run three times: one block, no blank lines
+  piling up, and the `[all]` header keeps a preceding `[cm5]` filter from
+  hiding `kernel=kernel8.img`.
+- Started as root with `SUDO_USER` set, the script re-ran as that user (its
+  log file belonged to the user) and stopped cleanly at the sudo check. Started
+  as plain root, it refused.
+
+Not verified: the real Pi 5 boot on `kernel8.img`, Xorg honouring
+`AccelMethod` from the `OutputClass`, and zram starting. On a Pi, `memcheck`
+confirms all three.
+
 ## Second pass: `inst_dark_theme_and_icons.sh`
 
-Run **after** `inst-min-lxqt-rpi5.sh` to apply a dark theme, Papirus icons and
+Run **after** `inst-lowmem-lxqt-rpi5.sh` to apply a dark theme, Papirus icons and
 a configured panel:
 
 ```bash
@@ -313,7 +372,7 @@ mode as the Arc-Dark problem above. Verify with
   fixed 8 px `spacer`, which is the conventional stand-in.
 - **Debian ships no `.desktop` file for urxvt**, so the script writes one into
   `~/.local/share/applications/` for the Quick Launch entry.
-- **Enabling the desktop reverses a base-script decision.** `inst-min-lxqt-rpi5.sh`
+- **Enabling the desktop reverses a base-script decision.** `inst-lowmem-lxqt-rpi5.sh`
   deliberately ran no desktop process and painted the background with
   `xsetroot`. Desktop icons cost roughly 30–45 MB RSS; `NO_DESKTOP=1` keeps the
   lighter arrangement and just writes the settings.
@@ -423,10 +482,9 @@ Verified with a freedesktop menu parser (pyxdg): the entry is listed under
 ## After install
 
 ```bash
-sudo reboot          # or: startx
+sudo reboot          # required after the kernel switch
 
-free -h
-ps -eo rss,comm --sort=-rss | head -20
+memcheck             # once logged in to the desktop
 ```
 
 # inst-lgpio-rpi5.sh

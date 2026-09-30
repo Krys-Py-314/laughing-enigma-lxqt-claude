@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
 #
-# inst-min-lxqt-rpi5.sh
+# inst-lowmem-lxqt-rpi5.sh
 #
-# Minimal-memory LXQt + Openbox desktop for Raspberry Pi 5
+# Minimal-memory LXQt + Openbox desktop for Raspberry Pi 5 (tuned for 2 GB)
 # Target: Raspberry Pi OS Lite 64-bit (Bookworm / Trixie), arm64
 #
-# Run as a NORMAL user with sudo rights:
-#     chmod +x inst-min-lxqt-rpi5.sh
-#     ./inst-min-lxqt-rpi5.sh
+# Run it as your normal user - no sudo needed:
+#     bash inst-lowmem-lxqt-rpi5.sh
+# It asks for your password once and uses sudo internally where root is
+# required. If you start it with sudo anyway, it drops back to your user.
+#
+# On top of the desktop install, this script applies the memory fixes that
+# close most of the gap to a Pi Zero 2 W running the same desktop:
+#   - 4 KB-page kernel (kernel8.img) instead of the 16 KB-page Pi 5 kernel
+#   - glamor (GPU acceleration inside Xorg) turned off
+#   - screen resolution capped (default 1920x1080)
+#   - zram compressed swap
+#   - a 'memcheck' command to measure the result after reboot
 #
 # Environment overrides:
+#     SKIP_KERNEL4K=1     keep the 16 KB-page Pi 5 kernel (kernel_2712.img)
+#     KEEP_GLAMOR=1       leave glamor (GPU acceleration in Xorg) enabled
+#     MAX_RES=WxH         resolution cap at login (default 1920x1080, 'off' = none)
+#     SKIP_ZRAM=1         do not set up zram swap
 #     SKIP_SSH_SWAP=1     keep OpenSSH, do not install/switch to dropbear
 #     SKIP_PI_APPS=1      skip Pi-Apps + Min + Geany Dark Mode
 #     SKIP_TRIM=1         do not disable triggerhappy
@@ -38,21 +51,38 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Check if running as root
+# Everything this script writes to $HOME must belong to the desktop user, so
+# it runs as that user and calls sudo itself. Started with sudo, it re-runs
+# itself as the invoking user; sudo's cached credentials cover the password.
 if [ "$EUID" -eq 0 ]; then
-    print_error "Please do not run this script as root. Run as normal user with sudo privileges."
+    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+        print_warning "Started with sudo - re-running as '${SUDO_USER}' (no sudo needed next time)."
+        exec sudo -u "$SUDO_USER" -H env \
+            SKIP_KERNEL4K="${SKIP_KERNEL4K:-0}" KEEP_GLAMOR="${KEEP_GLAMOR:-0}" \
+            MAX_RES="${MAX_RES:-1920x1080}" SKIP_ZRAM="${SKIP_ZRAM:-0}" \
+            SKIP_SSH_SWAP="${SKIP_SSH_SWAP:-0}" SKIP_PI_APPS="${SKIP_PI_APPS:-0}" \
+            SKIP_TRIM="${SKIP_TRIM:-0}" ASSUME_YES="${ASSUME_YES:-0}" \
+            bash "$(readlink -f "$0")" "$@"
+    fi
+    print_error "Do not run this as the root account. Log in as your normal user and run:"
+    print_error "    bash $(basename "$0")"
     exit 1
 fi
 
-print_status "Starting Raspberry Pi 5 Minimal LXQt/Openbox Setup..."
+print_status "Starting Raspberry Pi 5 low-memory LXQt/Openbox setup..."
 
 # ---------------------------------------------------------------------------
 # Globals / helpers
 # ---------------------------------------------------------------------------
-LOGFILE="$HOME/.inst-min-lxqt-rpi5.log"
+LOGFILE="$HOME/.inst-lowmem-lxqt-rpi5.log"
 SKIPPED_PKGS=()
 FAILED_STEPS=()
+REBOOT_NEEDED=0
 
+SKIP_KERNEL4K="${SKIP_KERNEL4K:-0}"
+KEEP_GLAMOR="${KEEP_GLAMOR:-0}"
+MAX_RES="${MAX_RES:-1920x1080}"
+SKIP_ZRAM="${SKIP_ZRAM:-0}"
 SKIP_SSH_SWAP="${SKIP_SSH_SWAP:-0}"
 SKIP_PI_APPS="${SKIP_PI_APPS:-0}"
 SKIP_TRIM="${SKIP_TRIM:-0}"
@@ -149,6 +179,19 @@ write_block() {
     } >>"$file"
 }
 
+# write_block for root-owned files (config.txt lives on the vfat boot partition).
+sudo_write_block() {
+    local file="$1" marker="$2" content="$3"
+    sudo touch "$file"
+    if sudo grep -q "^# >>> ${marker} >>>" "$file" 2>/dev/null; then
+        sudo sed -i "/^# >>> ${marker} >>>/,/^# <<< ${marker} <<</d" "$file"
+        # Drop the blank lines left at the end so re-runs do not pile them up.
+        sudo sed -i -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$file"
+    fi
+    printf '\n# >>> %s >>>\n%s\n# <<< %s <<<\n' "$marker" "$content" "$marker" \
+        | sudo tee -a "$file" >/dev/null
+}
+
 : >"$LOGFILE"
 print_status "Full command output is being logged to: $LOGFILE"
 
@@ -188,14 +231,22 @@ else
     print_warning "Not running on a Raspberry Pi (no /proc/device-tree/model)."
 fi
 
+print_status "Your password is asked for once; the script runs sudo itself from here on."
 if ! sudo -v; then
-    print_error "This script needs sudo privileges."
+    print_error "This script needs a user with sudo rights (it installs packages)."
     exit 1
 fi
 # Keep sudo alive for the whole run.
 ( while true; do sudo -n true 2>/dev/null; sleep 50; done ) &
 SUDO_KEEPALIVE_PID=$!
 trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null' EXIT
+
+# Firmware config: /boot/firmware on Bookworm and later, /boot before that.
+BOOTCFG=""
+for f in /boot/firmware/config.txt /boot/config.txt; do
+    [ -f "$f" ] && { BOOTCFG="$f"; break; }
+done
+BOOTDIR="${BOOTCFG%/*}"
 
 if ! ping -c1 -W3 deb.debian.org >/dev/null 2>&1 && ! ping -c1 -W3 1.1.1.1 >/dev/null 2>&1; then
     print_warning "Network check was inconclusive; continuing anyway."
@@ -236,7 +287,121 @@ sudo apt-get -y upgrade >>"$LOGFILE" 2>&1 || print_warning "apt-get upgrade repo
 apt_install ca-certificates curl wget unzip xz-utils git fontconfig procps
 
 # ===========================================================================
-banner "03 - X11 server (minimal: no display manager, no compositor)"
+banner "03 - Kernel with 4 KB memory pages (kernel8.img)"
+# ===========================================================================
+
+# The Pi 5 boots kernel_2712.img, built with 16 KB pages. Every allocation is
+# rounded up to a whole page, so a desktop made of many small processes uses
+# noticeably more RAM than on a 4 KB-page kernel (the Zero 2 W's default).
+# kernel8.img is the generic arm64 Pi kernel with 4 KB pages and boots the
+# Pi 5 fine; the cost is a few percent of CPU speed in some workloads.
+PAGE_SIZE="$(getconf PAGESIZE 2>/dev/null || echo unknown)"
+print_status "Running kernel $(uname -r) with ${PAGE_SIZE}-byte pages."
+
+if [ "$SKIP_KERNEL4K" = "1" ]; then
+    print_warning "SKIP_KERNEL4K=1 -> keeping the current kernel."
+elif [ "$PAGE_SIZE" = "4096" ]; then
+    print_status "Already on 4 KB pages; nothing to change."
+elif [ -z "$BOOTCFG" ]; then
+    note_fail "config.txt not found; cannot switch to kernel8.img."
+else
+    if [ ! -f "${BOOTDIR}/kernel8.img" ]; then
+        print_warning "${BOOTDIR}/kernel8.img is missing; installing the 4 KB-page kernel package."
+        apt_install_first linux-image-rpi-v8
+    fi
+    if [ -f "${BOOTDIR}/kernel8.img" ]; then
+        # Appended under [all] so no earlier [pi5]/[cm5] filter can hide it,
+        # and last in the file so it wins over any earlier kernel= line.
+        sudo_write_block "$BOOTCFG" "inst-lowmem-kernel4k" "$(printf '%s\n' \
+            '# 4 KB-page kernel: less RAM per process than the 16 KB-page kernel_2712.img.' \
+            '# Delete this block to go back to the default Pi 5 kernel.' \
+            '[all]' \
+            'kernel=kernel8.img')"
+        print_status "kernel=kernel8.img set in ${BOOTCFG} (takes effect after reboot)."
+        if grep -qE '^\s*auto_initramfs=1' "$BOOTCFG" && [ ! -f "${BOOTDIR}/initramfs8" ]; then
+            print_warning "auto_initramfs=1 is set but ${BOOTDIR}/initramfs8 is missing;"
+            print_warning "the Pi boots without it from SD/USB, but check if you use an encrypted or network root."
+        fi
+        REBOOT_NEEDED=1
+    else
+        note_fail "kernel8.img still missing; staying on the 16 KB-page kernel."
+    fi
+fi
+
+# ===========================================================================
+banner "04 - zram compressed swap"
+# ===========================================================================
+
+# zram keeps swapped-out pages in RAM, compressed to roughly a third. On a
+# 2 GB Pi it is the cheapest way to survive memory spikes (a browser, a
+# build) without touching the SD card.
+zram_active() {
+    swapon --show=NAME --noheadings 2>/dev/null | grep -q zram
+}
+
+if [ "$SKIP_ZRAM" = "1" ]; then
+    print_warning "SKIP_ZRAM=1 -> leaving swap alone."
+elif zram_active; then
+    print_status "zram swap is already active:"
+    swapon --show 2>/dev/null | sed 's/^/           /'
+elif dpkg-query -W -f='${Status}' rpi-swap 2>/dev/null | grep -q 'ok installed'; then
+    print_status "rpi-swap is installed and manages swap on this image; leaving it alone."
+else
+    ZRAM_OK=0
+    if pkg_available systemd-zram-generator; then
+        if [ -f /etc/systemd/zram-generator.conf ]; then
+            print_status "Keeping the existing /etc/systemd/zram-generator.conf."
+        else
+            # Half of RAM (1 GB on a 2 GB Pi), capped at 2 GB on bigger boards.
+            sudo tee /etc/systemd/zram-generator.conf >/dev/null <<'EOF'
+# Generated by inst-lowmem-lxqt-rpi5.sh
+[zram0]
+zram-size = min(ram / 2, 2048)
+compression-algorithm = zstd
+swap-priority = 100
+EOF
+        fi
+        if apt_install systemd-zram-generator; then
+            sudo systemctl daemon-reload >>"$LOGFILE" 2>&1
+            sudo systemctl start systemd-zram-setup@zram0.service >>"$LOGFILE" 2>&1 || true
+            ZRAM_OK=1
+        fi
+    elif pkg_available zram-tools; then
+        if apt_install zram-tools; then
+            sudo tee /etc/default/zramswap >/dev/null <<'EOF'
+# Generated by inst-lowmem-lxqt-rpi5.sh
+ALGO=zstd
+PERCENT=50
+PRIORITY=100
+EOF
+            sudo systemctl restart zramswap.service >>"$LOGFILE" 2>&1 || true
+            ZRAM_OK=1
+        fi
+    else
+        note_fail "Neither systemd-zram-generator nor zram-tools is available here."
+    fi
+
+    if [ "$ZRAM_OK" = "1" ]; then
+        # With swap in RAM, swapping early is cheap; reading one page at a
+        # time avoids decompressing neighbours nobody asked for.
+        sudo tee /etc/sysctl.d/99-inst-lowmem-zram.conf >/dev/null <<'EOF'
+# Generated by inst-lowmem-lxqt-rpi5.sh (tuned for zram swap)
+vm.swappiness = 100
+vm.page-cluster = 0
+EOF
+        sudo sysctl -q -p /etc/sysctl.d/99-inst-lowmem-zram.conf >>"$LOGFILE" 2>&1 || true
+        if zram_active; then
+            print_status "zram swap is active:"
+            swapon --show 2>/dev/null | sed 's/^/           /'
+        else
+            print_warning "zram is configured but not active yet; it will start at the next boot."
+            REBOOT_NEEDED=1
+        fi
+    fi
+fi
+
+# ===========================================================================
+banner "05 - X11 server (minimal: no display manager, no compositor)"
 # ===========================================================================
 
 # xserver-xorg-core carries the 'modesetting' driver used by the Pi's vc4 KMS
@@ -266,38 +431,94 @@ EOF
 print_status "Xwrapper configured for rootless startx."
 
 # ===========================================================================
-banner "04 - VC4 / KMS Xorg configuration for the Raspberry Pi 5"
+banner "06 - VC4 / KMS Xorg configuration, glamor off, resolution cap"
 # ===========================================================================
 
+# Glamor is Xorg's GPU acceleration. On the Pi 5 it loads the Mesa V3D driver
+# into the X server and keeps GPU buffers in system RAM; Raspberry Pi OS
+# already turns it off on the Pi 0-3. Without it Xorg draws in software, which
+# a panel, terminal and file manager do not notice. OpenGL programs (and
+# mpv's default video output) fall back to software rendering.
+# The option sits in the OutputClass that already selects the vc4 display
+# device: a separate "Device" section can make Xorg pick the Pi 5's
+# display-less v3d card instead and come up with no screen.
+if [ "$KEEP_GLAMOR" = "1" ]; then
+    GLAMOR_LINE=""
+    print_warning "KEEP_GLAMOR=1 -> glamor stays on."
+else
+    GLAMOR_LINE='    Option "AccelMethod" "none"'
+fi
+
 sudo mkdir -p /etc/X11/xorg.conf.d
-sudo tee /etc/X11/xorg.conf.d/99-vc4.conf >/dev/null <<'EOF'
+sudo tee /etc/X11/xorg.conf.d/99-vc4.conf >/dev/null <<EOF
 Section "OutputClass"
     Identifier "vc4"
     MatchDriver "vc4"
     Driver "modesetting"
     Option "PrimaryGPU" "true"
+${GLAMOR_LINE}
 EndSection
 EOF
-print_status "Wrote /etc/X11/xorg.conf.d/99-vc4.conf"
+if [ -n "$GLAMOR_LINE" ]; then
+    print_status "Wrote /etc/X11/xorg.conf.d/99-vc4.conf (glamor off)."
+else
+    print_status "Wrote /etc/X11/xorg.conf.d/99-vc4.conf (glamor on)."
+fi
+
+# A hand-made glamor-off "Device" file (the manual recipe) is replaced by the
+# option above; two definitions would only get in each other's way.
+if [ -f /etc/X11/xorg.conf.d/20-noglamor.conf ]; then
+    sudo mv /etc/X11/xorg.conf.d/20-noglamor.conf /etc/X11/xorg.conf.d/20-noglamor.conf.disabled
+    print_warning "Moved 20-noglamor.conf aside (now handled in 99-vc4.conf)."
+fi
+
+# Resolution cap. Every framebuffer and window buffer scales with the pixel
+# count, so a 4K screen costs roughly 4x the memory of 1080p. The helper only
+# steps an output DOWN to MAX_RES, and only if the monitor offers that mode,
+# so a smaller screen is never touched and a bad value cannot blank it.
+mkdir -p "$HOME/.local/bin"
+cat >"$HOME/.local/bin/cap-resolution" <<'CAPEOF'
+#!/bin/sh
+# cap-resolution WxH - lower any connected output running above WxH to WxH.
+# Generated by inst-lowmem-lxqt-rpi5.sh; called from ~/.xinitrc.
+MAX_RES="${1:-1920x1080}"
+[ "$MAX_RES" = "off" ] && exit 0
+command -v xrandr >/dev/null 2>&1 || exit 0
+xrandr --query 2>/dev/null | awk -v want="$MAX_RES" '
+function flush(   d, w) {
+    if (out != "" && cur != "" && has) {
+        split(cur, d, "x"); split(want, w, "x")
+        if (d[1] * d[2] > w[1] * w[2]) print out
+    }
+    out = ""; cur = ""; has = 0
+}
+/^[^ \t]/ { flush(); if ($2 == "connected") out = $1; next }
+out != "" { if ($1 == want) has = 1; if ($0 ~ /\*/) cur = $1 }
+END { flush() }' | while read -r output; do
+    xrandr --output "$output" --mode "$MAX_RES"
+done
+CAPEOF
+chmod +x "$HOME/.local/bin/cap-resolution"
+if [ "$MAX_RES" = "off" ]; then
+    print_warning "MAX_RES=off -> resolution left at the monitor's default."
+else
+    print_status "Resolution capped at ${MAX_RES} on login (~/.local/bin/cap-resolution)."
+fi
 
 # Make sure the KMS overlay is actually enabled in the firmware config.
-BOOTCFG=""
-for f in /boot/firmware/config.txt /boot/config.txt; do
-    [ -f "$f" ] && { BOOTCFG="$f"; break; }
-done
 if [ -n "$BOOTCFG" ]; then
     if grep -qE '^\s*dtoverlay=vc4-kms-v3d' "$BOOTCFG"; then
         print_status "vc4-kms-v3d overlay already enabled in $BOOTCFG"
     else
         print_warning "Adding dtoverlay=vc4-kms-v3d to $BOOTCFG"
-        echo -e "\n# Added by inst-min-lxqt-rpi5.sh\ndtoverlay=vc4-kms-v3d" | sudo tee -a "$BOOTCFG" >/dev/null
+        echo -e "\n# Added by inst-lowmem-lxqt-rpi5.sh\n[all]\ndtoverlay=vc4-kms-v3d" | sudo tee -a "$BOOTCFG" >/dev/null
     fi
 else
     print_warning "Could not find config.txt; skipping KMS overlay check."
 fi
 
 # ===========================================================================
-banner "05 - LXQt core (hand-picked modules, no lxqt-core metapackage)"
+banner "07 - LXQt core (hand-picked modules, no lxqt-core metapackage)"
 # ===========================================================================
 
 # Deliberately NOT installing: lxqt-core, lxqt-powermanagement, lxqt-admin,
@@ -314,19 +535,19 @@ apt_install \
     lxqt-themes
 
 # ===========================================================================
-banner "06 - Openbox window manager"
+banner "08 - Openbox window manager"
 # ===========================================================================
 
 apt_install openbox obconf-qt
 
 # ===========================================================================
-banner "07 - Terminal, file manager, text editor"
+banner "09 - Terminal, file manager, text editor"
 # ===========================================================================
 
 apt_install rxvt-unicode pcmanfm-qt l3afpad
 
 # ===========================================================================
-banner "08 - Media: PDF viewer, image viewer, video player, screen recorder"
+banner "10 - Media: PDF viewer, image viewer, video player, screen recorder"
 # ===========================================================================
 
 # mupdf   : smallest usable PDF viewer (single binary, ~30 MB RSS)
@@ -374,7 +595,7 @@ chmod +x "$HOME/.local/bin/screenrec"
 print_status "Installed screen recorder: ~/.local/bin/screenrec (run again to stop)"
 
 # ===========================================================================
-banner "09 - Ubuntu Nerd Font (system-wide, regular, size ${FONT_SIZE})"
+banner "11 - Ubuntu Nerd Font (system-wide, regular, size ${FONT_SIZE})"
 # ===========================================================================
 
 NF_DIR="/usr/local/share/fonts/NerdFonts"
@@ -449,7 +670,7 @@ sudo fc-cache -f >>"$LOGFILE" 2>&1
 print_status "System-wide font defaults written to /etc/fonts/local.conf"
 
 # ===========================================================================
-banner "10 - Icons (circle apps, dark folders) and square Openbox theme"
+banner "12 - Icons (circle apps, dark folders) and square Openbox theme"
 # ===========================================================================
 
 apt_install numix-icon-theme-circle numix-icon-theme
@@ -467,7 +688,7 @@ OB_THEME="SquareDark"
 for base in "$HOME/.local/share/themes" "$HOME/.themes" "$HOME/.config/themes"; do
     mkdir -p "${base}/${OB_THEME}/openbox-3"
     cat >"${base}/${OB_THEME}/openbox-3/themerc" <<EOF
-# ${OB_THEME} - flat, square, dark. Generated by inst-min-lxqt-rpi5.sh
+# ${OB_THEME} - flat, square, dark. Generated by inst-lowmem-lxqt-rpi5.sh
 border.width: 1
 padding.width: 4
 padding.height: 3
@@ -563,7 +784,7 @@ A copy of the SquareDark Openbox theme is kept in all three.
 EOF
 
 # ===========================================================================
-banner "11 - Development toolchain, Pi utilities and GPIO C libraries"
+banner "13 - Development toolchain, Pi utilities and GPIO C libraries"
 # ===========================================================================
 
 apt_install gcc g++ make pkg-config libc6-dev
@@ -622,7 +843,7 @@ EOF
 print_status "GPIO notes written to ~/dev/README-GPIO.md"
 
 # ===========================================================================
-banner "12 - Vimb web browser (apt when packaged, otherwise built from source)"
+banner "14 - Vimb web browser (apt when packaged, otherwise built from source)"
 # ===========================================================================
 
 if command -v vimb >/dev/null 2>&1; then
@@ -662,7 +883,7 @@ else
 fi
 
 # ===========================================================================
-banner "13 - fastfetch"
+banner "15 - fastfetch"
 # ===========================================================================
 
 if command -v fastfetch >/dev/null 2>&1; then
@@ -686,7 +907,7 @@ else
 fi
 
 # ===========================================================================
-banner "14 - Oh My Posh prompt"
+banner "16 - Oh My Posh prompt"
 # ===========================================================================
 
 if command -v oh-my-posh >/dev/null 2>&1 || [ -x "$HOME/.local/bin/oh-my-posh" ]; then
@@ -710,7 +931,7 @@ if [ ! -f "${OMP_THEME_DIR}/nu4a.omp.json" ]; then
 fi
 
 # ===========================================================================
-banner "15 - User directories (local bin, config dirs, XDG user dirs)"
+banner "17 - User directories (local bin, config dirs, XDG user dirs)"
 # ===========================================================================
 
 mkdir -p "$HOME/.local/bin"
@@ -739,9 +960,11 @@ EOF
 print_status "XDG user directories created."
 
 # ===========================================================================
-banner "16 - Shell configuration (~/.bashrc aliases, PATH, prompt)"
+banner "18 - Shell configuration (~/.bashrc aliases, PATH, prompt)"
 # ===========================================================================
 
+# The block keeps its old marker name so re-running over an install made by
+# inst-min-lxqt-rpi5.sh replaces that block instead of adding a second one.
 write_block "$HOME/.bashrc" "inst-min-lxqt-rpi5" "$(cat <<'EOF'
 export PATH=$PATH:$HOME/.local/bin
 
@@ -768,12 +991,12 @@ print_status "Aliases (ll, la, edit, leafpad), PATH and prompt added to ~/.bashr
 print_warning "Note: 'leafpad' is aliased to l3afpad (the GTK3 fork actually installed)."
 
 # ===========================================================================
-banner "17 - Fonts, colours and themes applied to X11 / Qt / GTK / urxvt"
+banner "19 - Fonts, colours and themes applied to X11 / Qt / GTK / urxvt"
 # ===========================================================================
 
 # --- X resources: urxvt with the Nerd Font, dark palette, no scrollbar ------
 cat >"$HOME/.Xresources" <<EOF
-! Generated by inst-min-lxqt-rpi5.sh
+! Generated by inst-lowmem-lxqt-rpi5.sh
 
 Xft.antialias:  1
 Xft.hinting:    1
@@ -897,7 +1120,7 @@ EOF
 print_status "GTK2/GTK3 font and icon settings written."
 
 # ===========================================================================
-banner "18 - Openbox configuration (square windows, menu, keybindings)"
+banner "20 - Openbox configuration (square windows, menu, keybindings)"
 # ===========================================================================
 
 mkdir -p "$HOME/.config/openbox"
@@ -952,10 +1175,11 @@ chmod +x "$HOME/.config/openbox/autostart"
 # --- Session startup: no display manager, startx straight from tty1 --------
 cat >"$HOME/.xinitrc" <<EOF
 #!/bin/sh
-# Generated by inst-min-lxqt-rpi5.sh
+# Generated by inst-lowmem-lxqt-rpi5.sh
 [ -f "\$HOME/.Xresources" ] && xrdb -merge "\$HOME/.Xresources"
 xsetroot -solid "${BG_COLOR}"
 xset s off -dpms
+"\$HOME/.local/bin/cap-resolution" "${MAX_RES}"
 exec startlxqt
 EOF
 chmod +x "$HOME/.xinitrc"
@@ -1019,7 +1243,7 @@ EOF
 update-desktop-database "$HOME/.local/share/applications" >>"$LOGFILE" 2>&1 || true
 
 # ===========================================================================
-banner "19 - Desktop background: flat colour ${BG_COLOR} (R:56 G:60 B:72), no wallpaper"
+banner "21 - Desktop background: flat colour ${BG_COLOR} (R:56 G:60 B:72), no wallpaper"
 # ===========================================================================
 
 cat >"$HOME/.config/autostart/set-desktop-bg.desktop" <<EOF
@@ -1034,7 +1258,7 @@ EOF
 print_status "Background set to ${BG_COLOR} via xsetroot (no wallpaper, no desktop process)."
 
 # ===========================================================================
-banner "20 - Pi-Apps (64-bit) plus 'Min' and 'Geany Dark Mode'"
+banner "22 - Pi-Apps (64-bit) plus 'Min' and 'Geany Dark Mode'"
 # ===========================================================================
 
 if [ "$SKIP_PI_APPS" = "1" ]; then
@@ -1084,7 +1308,7 @@ else
 fi
 
 # ===========================================================================
-banner "21 - Disabling the idle triggerhappy hotkey daemon"
+banner "23 - Disabling the idle triggerhappy hotkey daemon"
 # ===========================================================================
 
 if [ "$SKIP_TRIM" = "1" ]; then
@@ -1108,7 +1332,7 @@ else
 
     # avahi-daemon is deliberately LEFT RUNNING: it publishes the Pi as
     # <hostname>.local over mDNS. Disabling it would break 'ssh pi@raspberrypi.local'
-    # right before step 22 swaps the SSH server out from under you.
+    # right before step 24 swaps the SSH server out from under you.
     print_status "avahi-daemon left running (keeps <hostname>.local reachable)."
     print_warning "Bluetooth and Wi-Fi services were left untouched on purpose."
 fi
@@ -1117,7 +1341,7 @@ sudo apt-get -y autoremove --purge >>"$LOGFILE" 2>&1 || true
 sudo apt-get -y clean >>"$LOGFILE" 2>&1 || true
 
 # ===========================================================================
-banner "22 - SSH server: dropbear replaces OpenSSH"
+banner "24 - SSH server: dropbear replaces OpenSSH"
 # ===========================================================================
 
 # How much this actually saves depends entirely on how OpenSSH is started:
@@ -1205,7 +1429,7 @@ else
             # comes from the unit's ListenStream (22 by default) and this file
             # is ignored - harmless either way.
             sudo tee /etc/default/dropbear >/dev/null <<'EOF'
-# Generated by inst-min-lxqt-rpi5.sh
+# Generated by inst-lowmem-lxqt-rpi5.sh
 NO_START=0
 DROPBEAR_PORT=22
 DROPBEAR_EXTRA_ARGS=
@@ -1341,7 +1565,53 @@ EOF
 fi
 
 # ===========================================================================
-banner "23 - Summary"
+banner "25 - memcheck: one command to measure the result"
+# ===========================================================================
+
+cat >"$HOME/.local/bin/memcheck" <<'MCEOF'
+#!/bin/sh
+# memcheck - show what decides this Pi's desktop memory use.
+# Generated by inst-lowmem-lxqt-rpi5.sh. Run it inside the desktop.
+ps_="$(getconf PAGESIZE 2>/dev/null)"
+echo "Page size   : ${ps_} bytes"
+[ "$ps_" = "4096" ] || echo "              ^ not 4 KB: check 'kernel=kernel8.img' in /boot/firmware/config.txt"
+echo "Arch/kernel : $(dpkg --print-architecture 2>/dev/null) / $(uname -r)"
+
+if [ -n "${DISPLAY:-}" ] && command -v xrandr >/dev/null 2>&1; then
+    echo "Resolution  : $(xrandr --query 2>/dev/null | awk '/\*/{printf "%s ", $1}')"
+else
+    echo "Resolution  : (run inside the desktop to see it)"
+fi
+
+log=""
+for f in "$HOME/.local/share/xorg/Xorg.0.log" /var/log/Xorg.0.log; do
+    [ -f "$f" ] && { log="$f"; break; }
+done
+if [ -z "$log" ]; then
+    echo "Glamor      : unknown (no Xorg log yet)"
+elif grep -q 'glamor initialized' "$log"; then
+    echo "Glamor      : ON  ($log)"
+else
+    echo "Glamor      : off ($log)"
+fi
+
+echo
+echo "Swap:"
+swapon --show 2>/dev/null | sed 's/^/  /'
+swapon --show 2>/dev/null | grep -q . || echo "  (none)"
+echo
+free -h
+echo
+grep -E '^(AnonPages|Shmem|Slab|SUnreclaim|PageTables|KernelStack):' /proc/meminfo
+echo
+echo "Largest processes (RSS kB):"
+ps -eo rss,comm --sort=-rss | head -15
+MCEOF
+chmod +x "$HOME/.local/bin/memcheck"
+print_status "Installed ~/.local/bin/memcheck (run it after logging in to the desktop)."
+
+# ===========================================================================
+banner "26 - Summary"
 # ===========================================================================
 
 echo ""
@@ -1356,6 +1626,10 @@ echo "  PDF / Image  : mupdf / feh    Video  : mpv"
 echo "  Recorder     : screenrec (toggle, ffmpeg x11grab -> ~/Videos)"
 echo "  Dev          : gcc g++ make, libgpiod, raspi-utils-core, git, curl"
 echo "  Prompt       : oh-my-posh     Sysinfo: fastfetch"
+echo "  Kernel       : $([ "$SKIP_KERNEL4K" = "1" ] && echo "unchanged (SKIP_KERNEL4K=1)" || echo "kernel8.img, 4 KB pages")"
+echo "  Glamor       : $([ "$KEEP_GLAMOR" = "1" ] && echo "on (KEEP_GLAMOR=1)" || echo "off")"
+echo "  Resolution   : $([ "$MAX_RES" = "off" ] && echo "monitor default" || echo "capped at ${MAX_RES}")"
+echo "  Swap         : $(swapon --show=NAME --noheadings 2>/dev/null | tr '\n' ' ' | sed 's/ $//;s/^$/none active yet/')"
 echo ""
 
 if [ "${#SKIPPED_PKGS[@]}" -gt 0 ]; then
@@ -1374,8 +1648,15 @@ else
 fi
 
 print_status " "
-print_status "Reboot to start the desktop:   sudo reboot"
-print_status "Or start it now from tty1:     startx"
+if [ "$REBOOT_NEEDED" = "1" ]; then
+    print_warning "A REBOOT IS REQUIRED for the 4 KB-page kernel / zram to take effect:"
+    print_warning "    sudo reboot"
+else
+    print_status "Reboot to start the desktop:   sudo reboot"
+    print_status "Or start it now from tty1:     startx"
+fi
 print_status " "
-print_status "Memory check once logged in:   free -h ; ps -eo rss,comm --sort=-rss | head -20"
+print_status "Once logged in to the desktop, measure with:   memcheck"
+print_status "(compare the 'used' column with the 486 MB you had before)"
+print_status "After a kernel update, re-run memcheck: page size must still say 4096."
 print_status "Setup finished."

@@ -3,7 +3,7 @@
 # inst_dark_theme_and_icons.sh
 #
 # Dark theme + icon pass for the minimal LXQt/Openbox desktop built by
-# inst-min-lxqt-rpi5.sh. Run it AFTER that script.
+# inst-lowmem-lxqt-rpi5.sh. Run it AFTER that script.
 #
 #     chmod +x inst_dark_theme_and_icons.sh
 #     ./inst_dark_theme_and_icons.sh
@@ -187,10 +187,10 @@ trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null' EXIT
 
 if [ ! -f "$HOME/.config/openbox/rc.xml" ]; then
     print_warning "No ~/.config/openbox/rc.xml found."
-    print_warning "This script is meant to run AFTER inst-min-lxqt-rpi5.sh."
+    print_warning "This script is meant to run AFTER inst-lowmem-lxqt-rpi5.sh."
     confirm "Continue anyway?" || exit 1
 else
-    print_status "Base desktop from inst-min-lxqt-rpi5.sh detected."
+    print_status "Base desktop from inst-lowmem-lxqt-rpi5.sh detected."
 fi
 
 # LXQt rewrites its own config files when the session exits. Editing them
@@ -515,7 +515,7 @@ print_status "Files:   detailed list view, hidden files shown."
 if [ "$NO_DESKTOP" = "1" ]; then
     print_warning "NO_DESKTOP=1 -> desktop process not enabled; settings written only."
 else
-    # inst-min-lxqt-rpi5.sh masked the desktop modules with Hidden=true stubs
+    # inst-lowmem-lxqt-rpi5.sh masked the desktop modules with Hidden=true stubs
     # to save memory. Enabling desktop icons means undoing that.
     for mod in lxqt-desktop pcmanfm-qt-desktop; do
         stub="$HOME/.config/autostart/${mod}.desktop"
@@ -736,7 +736,7 @@ banner "10 - System tray applications (what statusnotifier actually shows)"
 # because the applications are not installed or not autostarted - there is no
 # panel setting that adds them.
 #
-# inst-min-lxqt-rpi5.sh deliberately left lxqt-powermanagement out and masked
+# inst-lowmem-lxqt-rpi5.sh deliberately left lxqt-powermanagement out and masked
 # its autostart to save memory, so this step reverses that too.
 print_warning "These applets cost roughly 50-70 MB RSS in total, which works"
 print_warning "against the base script's minimum-memory goal. Skip this step"

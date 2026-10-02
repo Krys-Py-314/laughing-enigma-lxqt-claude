@@ -3,13 +3,31 @@
 # vs_lxqt_panel_left.sh
 #
 # Sets the LXQt Fancy Menu option "Categories Position" to Left
-# (Fancy Menu Settings > Categories Position) on Debian Trixie / Raspberry Pi 5.
+# (Fancy Menu Settings > Categories Position) and renames some menu entries,
+# on Debian Trixie / Raspberry Pi 5.
 #
 #     chmod +x vs_lxqt_panel_left.sh
-#     ./vs_lxqt_panel_left.sh            # categories on the left
-#     ./vs_lxqt_panel_left.sh --right    # put them back on the right (default)
+#     ./vs_lxqt_panel_left.sh                   # categories left + renames
+#     ./vs_lxqt_panel_left.sh --right           # categories back on the right
+#     ./vs_lxqt_panel_left.sh --no-rename       # only move the categories
+#     ./vs_lxqt_panel_left.sh --restore-names   # undo the renames only
+#
+# Renamed entries:
+#     Accessories  : FeatherPad              -> Text Editor (Featherpad)
+#     Accessories  : LXQt File Archiver      -> File Archiver
+#     Accessories  : PCManFM-Qt File Manager -> File Manager (PCManFM-Qt)
+#     Internet     : vimb                    -> Browser (vimb)
+#     System Tools : QTerminal               -> Terminal (QTerminal)
 #
 # How it works:
+#     Menu labels come from the Name= line of each app's .desktop file in
+#     /usr/share/applications. Those files are NOT edited (the next apt
+#     upgrade would put them back). A copy with the new Name= is written to
+#     ~/.local/share/applications/, which the menu reads first. The
+#     translated Name[xx]= lines are dropped from the copy, otherwise a
+#     non-English locale would still show the old label. Apps that are not
+#     installed are skipped.
+#
 #     The settings dialog stores the choice in ~/.config/lxqt/panel.conf as
 #     categoriesAtRight=<bool> inside every plugin section with
 #     type=fancymenu (false = Left, true or missing = Right). This script
@@ -60,15 +78,31 @@ SYS_PANEL="/etc/xdg/lxqt/panel.conf"
 ASSUME_YES="${ASSUME_YES:-0}"
 VALUE="false"
 SIDE="Left"
+DO_POSITION=1
+DO_RENAME=1
+RESTORE_NAMES=0
+APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+MARKER="X-Renamed-By=vs_lxqt_panel_left.sh"
+
+# desktop file IDs to try | program in Exec= (fallback search) | new label
+RENAMES=(
+    "featherpad.desktop org.featherpad.FeatherPad.desktop|featherpad|Text Editor (Featherpad)"
+    "lxqt-archiver.desktop org.lxqt.lxqt-archiver.desktop|lxqt-archiver|File Archiver"
+    "pcmanfm-qt.desktop org.lxqt.pcmanfm-qt.desktop|pcmanfm-qt|File Manager (PCManFM-Qt)"
+    "vimb.desktop|vimb|Browser (vimb)"
+    "qterminal.desktop org.lxqt.qterminal.desktop|qterminal|Terminal (QTerminal)"
+)
 
 usage() {
-    sed -n '8,10p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '9,13p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 for arg in "$@"; do
     case "$arg" in
         --right)   VALUE="true"; SIDE="Right" ;;
         --left)    VALUE="false"; SIDE="Left" ;;
+        --no-rename)     DO_RENAME=0 ;;
+        --restore-names) RESTORE_NAMES=1; DO_RENAME=0; DO_POSITION=0 ;;
         -h|--help) usage; exit 0 ;;
         *)         print_error "Unknown option: $arg"; usage; exit 1 ;;
     esac
@@ -93,6 +127,115 @@ fancymenu_sections() {
         sec != "" && /^[ \t]*type[ \t]*=[ \t]*fancymenu[ \t]*$/ { print sec }
     ' "$1"
 }
+
+# Prints the system .desktop file for an app: first by file ID, then by
+# searching for a [Desktop Entry] whose Exec= runs the program with nothing
+# but a %-field code after it (so "qterminal --drop" is not picked).
+find_source() {
+    local ids="$1" bin="$2" dir id f
+    local IFS_SAVE="$IFS"
+    IFS=':'
+    local dirs=(${XDG_DATA_DIRS:-/usr/local/share:/usr/share})
+    IFS="$IFS_SAVE"
+    for id in $ids; do
+        for dir in "${dirs[@]}"; do
+            f="${dir}/applications/${id}"
+            [ -f "$f" ] && { printf '%s' "$f"; return 0; }
+        done
+    done
+    for dir in "${dirs[@]}"; do
+        for f in "${dir}"/applications/*.desktop; do
+            [ -f "$f" ] || continue
+            awk -v bin="$bin" '
+                /^\[/ { main = ($0 == "[Desktop Entry]"); next }
+                main && /^Exec=/ {
+                    sub(/^Exec=/, ""); n = split($0, w, /[ \t]+/)
+                    p = w[1]; sub(/.*\//, "", p)
+                    if (p == bin && (n == 1 || (n == 2 && w[2] ~ /^%[a-zA-Z]$/))) found = 1
+                }
+                END { exit !found }
+            ' "$f" && { printf '%s' "$f"; return 0; }
+        done
+    done
+    return 1
+}
+
+refresh_menu_cache() {
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$APPS_DIR" >/dev/null 2>&1 || true
+    fi
+    # Touching the directory wakes the panel's file watcher so the menu
+    # rebuilds itself without a restart.
+    touch "$APPS_DIR" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
+# Menu labels
+# ---------------------------------------------------------------------------
+if [ "$RESTORE_NAMES" = "1" ]; then
+    print_status "Restoring the original menu labels..."
+    restored=0
+    for dest in "$APPS_DIR"/*.desktop; do
+        [ -f "$dest" ] && grep -qx "$MARKER" "$dest" || continue
+        if [ -f "${dest}.before-rename" ]; then
+            mv -f -- "${dest}.before-rename" "$dest"
+        else
+            rm -f -- "$dest"
+        fi
+        print_status "Restored $(basename -- "$dest")"
+        restored=1
+    done
+    [ "$restored" = "1" ] || print_status "No renamed entries found - nothing to restore."
+    refresh_menu_cache
+    exit 0
+fi
+
+if [ "$DO_RENAME" = "1" ]; then
+    print_status "Renaming menu entries..."
+    mkdir -p -- "$APPS_DIR" || { print_error "Could not create ${APPS_DIR}"; exit 1; }
+    for spec in "${RENAMES[@]}"; do
+        IFS='|' read -r ids bin label <<<"$spec"
+        if ! src="$(find_source "$ids" "$bin")"; then
+            print_warning "${bin} is not installed - skipped \"${label}\"."
+            continue
+        fi
+        id="$(basename -- "$src")"
+        dest="${APPS_DIR}/${id}"
+        base="$src"
+        if [ -f "$dest" ] && ! grep -qx "$MARKER" "$dest"; then
+            # A user copy made by something else: keep its other changes and
+            # save it so --restore-names can put it back.
+            cp -p -- "$dest" "${dest}.before-rename"
+            base="${dest}.before-rename"
+        elif [ -f "${dest}.before-rename" ]; then
+            base="${dest}.before-rename"
+        fi
+        tmp="$(mktemp "${dest}.XXXXXX")" || { print_error "mktemp failed"; exit 1; }
+        # Inside [Desktop Entry]: replace Name=, drop Name[xx]=, add a marker.
+        # [Desktop Action ...] sections keep their own Name= lines.
+        awk -v label="$label" -v marker="$MARKER" '
+            /^\[/ {
+                main = ($0 == "[Desktop Entry]")
+                print
+                if (main) { print "Name=" label; print marker }
+                next
+            }
+            main && /^(Name(\[[^]]*\])?|X-Renamed-By)[ \t]*=/ { next }
+            { print }
+        ' "$base" >"$tmp"
+        if ! grep -qx "Name=${label}" "$tmp"; then
+            rm -f -- "$tmp"
+            print_warning "Could not build a renamed copy of ${src} - skipped."
+            continue
+        fi
+        chmod 0644 "$tmp"
+        mv -f -- "$tmp" "$dest"
+        print_status "${id}: \"${label}\""
+    done
+    refresh_menu_cache
+fi
+
+[ "$DO_POSITION" = "1" ] || exit 0
 
 print_status "Setting Fancy Menu \"Categories Position\" to ${SIDE}..."
 

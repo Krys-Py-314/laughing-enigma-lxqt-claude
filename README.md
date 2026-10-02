@@ -481,21 +481,48 @@ Verified with a freedesktop menu parser (pyxdg): the entry is listed under
 
 ## Fancy Menu categories on the left: `vs_lxqt_panel_left.sh`
 
-Sets **Fancy Menu Settings > Categories Position** to **Left**. Standalone.
+Sets **Fancy Menu Settings > Categories Position** to **Left** and renames five
+menu entries. Standalone.
 
 ```bash
 chmod +x vs_lxqt_panel_left.sh
-./vs_lxqt_panel_left.sh            # categories on the left
-./vs_lxqt_panel_left.sh --right    # back to the default (right)
+./vs_lxqt_panel_left.sh                   # categories left + renames
+./vs_lxqt_panel_left.sh --right           # categories back on the right
+./vs_lxqt_panel_left.sh --no-rename       # only move the categories
+./vs_lxqt_panel_left.sh --restore-names   # undo the renames only
 ```
 
-The dialog stores this as `categoriesAtRight` in `~/.config/lxqt/panel.conf`,
-in each section with `type=fancymenu` (`false` = Left; missing = Right). The
-script sets only that key, keeps a dated backup of `panel.conf`, and touches no
-other section. `lxqt-panel` writes `panel.conf` back when it exits, so a
-running panel is stopped before the edit and started again afterwards. If the
-panel uses the classic `mainmenu` instead, the script stops with an error,
-because that plugin has no category position option.
+| Category | Before | After |
+|---|---|---|
+| Accessories | FeatherPad | Text Editor (Featherpad) |
+| Accessories | LXQt File Archiver | File Archiver |
+| Accessories | PCManFM-Qt File Manager | File Manager (PCManFM-Qt) |
+| Internet | vimb | Browser (vimb) |
+| System Tools | QTerminal | Terminal (QTerminal) |
+
+**Position.** The dialog stores this as `categoriesAtRight` in
+`~/.config/lxqt/panel.conf`, in each section with `type=fancymenu` (`false` =
+Left; missing = Right). The script sets only that key, keeps a dated backup of
+`panel.conf`, and touches no other section. `lxqt-panel` writes `panel.conf`
+back when it exits, so a running panel is stopped before the edit and started
+again afterwards. If the panel uses the classic `mainmenu` instead, the script
+stops with an error, because that plugin has no category position option.
+
+**Labels.** The menu shows each app's `Name=` from its `.desktop` file. The
+packaged files in `/usr/share/applications/` are not edited, because an upgrade
+would put them back. Instead a copy with the new `Name=` goes to
+`~/.local/share/applications/` under the same file name, which the menu reads
+first. The translated `Name[xx]=` lines are removed from the copy, otherwise a
+non-English locale would still show the old label. If you already had your own
+copy there, it is kept as `<name>.desktop.before-rename` and the rename is
+applied on top of it. `--restore-names` removes only the files this script
+wrote (marked `X-Renamed-By=vs_lxqt_panel_left.sh`) and puts any saved copy
+back. Apps that are not installed are skipped with a warning.
+
+Verified against the packaged `.desktop` files of featherpad, lxqt-archiver,
+pcmanfm-qt and qterminal, plus a vimb entry: pyxdg reads the new labels (also
+under `LANG=de_DE.UTF-8`), the `QTerminal drop down` entry and the right-click
+actions keep their names, and `--restore-names` returns everything as it was.
 
 ## After install
 

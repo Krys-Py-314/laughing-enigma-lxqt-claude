@@ -495,7 +495,7 @@ chmod +x vs_lxqt_panel_left.sh
 | Category | Before | After |
 |---|---|---|
 | Accessories | FeatherPad | Text Editor (Featherpad) |
-| Accessories | LXQt File Archiver | File Archiver (LXQT File Archiver) |
+| Accessories | LXQt File Archiver | File Archiver (LXQt File Archiver) |
 | Accessories | PCManFM-Qt File Manager | File Manager (PCManFM-Qt) |
 | Internet | vimb | Browser (vimb) |
 | System Tools | QTerminal | Terminal (QTerminal) |

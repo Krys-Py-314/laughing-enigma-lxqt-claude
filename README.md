@@ -479,6 +479,24 @@ The menu usually updates straight away. If it does not, log out and back in.
 Verified with a freedesktop menu parser (pyxdg): the entry is listed under
 `System` before the script runs, absent after, and back after `--undo`.
 
+## Fancy Menu categories on the left: `vs_lxqt_panel_left.sh`
+
+Sets **Fancy Menu Settings > Categories Position** to **Left**. Standalone.
+
+```bash
+chmod +x vs_lxqt_panel_left.sh
+./vs_lxqt_panel_left.sh            # categories on the left
+./vs_lxqt_panel_left.sh --right    # back to the default (right)
+```
+
+The dialog stores this as `categoriesAtRight` in `~/.config/lxqt/panel.conf`,
+in each section with `type=fancymenu` (`false` = Left; missing = Right). The
+script sets only that key, keeps a dated backup of `panel.conf`, and touches no
+other section. `lxqt-panel` writes `panel.conf` back when it exits, so a
+running panel is stopped before the edit and started again afterwards. If the
+panel uses the classic `mainmenu` instead, the script stops with an error,
+because that plugin has no category position option.
+
 ## After install
 
 ```bash

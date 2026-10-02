@@ -14,7 +14,7 @@
 #
 # Renamed entries:
 #     Accessories  : FeatherPad              -> Text Editor (Featherpad)
-#     Accessories  : LXQt File Archiver      -> File Archiver
+#     Accessories  : LXQt File Archiver      -> File Archiver (LXQT File Archiver)
 #     Accessories  : PCManFM-Qt File Manager -> File Manager (PCManFM-Qt)
 #     Internet     : vimb                    -> Browser (vimb)
 #     System Tools : QTerminal               -> Terminal (QTerminal)
@@ -87,7 +87,7 @@ MARKER="X-Renamed-By=vs_lxqt_panel_left.sh"
 # desktop file IDs to try | program in Exec= (fallback search) | new label
 RENAMES=(
     "featherpad.desktop org.featherpad.FeatherPad.desktop|featherpad|Text Editor (Featherpad)"
-    "lxqt-archiver.desktop org.lxqt.lxqt-archiver.desktop|lxqt-archiver|File Archiver"
+    "lxqt-archiver.desktop org.lxqt.lxqt-archiver.desktop|lxqt-archiver|File Archiver (LXQT File Archiver)"
     "pcmanfm-qt.desktop org.lxqt.pcmanfm-qt.desktop|pcmanfm-qt|File Manager (PCManFM-Qt)"
     "vimb.desktop|vimb|Browser (vimb)"
     "qterminal.desktop org.lxqt.qterminal.desktop|qterminal|Terminal (QTerminal)"

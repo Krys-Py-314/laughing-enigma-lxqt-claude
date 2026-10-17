@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# inst-lgpio-rpi5.sh
+# 08_enigma_lgpio-setup.sh
 #
 # Install the lgpio GPIO library (C library + Python 3 bindings) on a
 # Raspberry Pi 5 running Debian 13 "Trixie" (arm64), starting from a bare
@@ -16,8 +16,8 @@
 #      "gpio" group and a udev rule.
 #
 # Run as a NORMAL user with sudo rights:
-#     chmod +x inst-lgpio-rpi5.sh
-#     ./inst-lgpio-rpi5.sh
+#     chmod +x 08_enigma_lgpio-setup.sh
+#     ./08_enigma_lgpio-setup.sh
 #
 # Environment overrides:
 #     FROM_SOURCE=1       skip the apt packages, always build from source

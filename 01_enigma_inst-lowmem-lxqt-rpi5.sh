@@ -7,6 +7,7 @@
 #
 # Run it as your normal user - no sudo needed:
 #     bash inst-lowmem-lxqt-rpi5.sh
+#
 # It asks for your password once and uses sudo internally where root is
 # required. If you start it with sudo anyway, it drops back to your user.
 #
@@ -1659,8 +1660,8 @@ print_status " "
 print_status "Once logged in to the desktop, measure with:   memcheck"
 print_status "(compare the 'used' column with the 486 MB you had before)"
 print_status "After a kernel update, re-run memcheck: page size must still say 4096."
-<<<<<<< HEAD
+#<<<<<<< HEAD
 print_status "Setup finished."
-=======
+#=======
 print_status "Setup finished."
->>>>>>> 0b76974e824a66b3a4b5e642d90a4ce576c1cbfd
+#>>>>>>> 0b76974e824a66b3a4b5e642d90a4ce576c1cbfd

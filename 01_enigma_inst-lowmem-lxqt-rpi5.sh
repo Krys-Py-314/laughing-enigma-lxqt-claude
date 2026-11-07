@@ -545,7 +545,7 @@ apt_install openbox obconf-qt
 banner "09 - Terminal, file manager, text editor"
 # ===========================================================================
 
-apt_install  pcmanfm-qt 
+apt_install rxvt-unicode pcmanfm-qt featherpad 
 # rxvt-unicode
 # l3afpad
 
@@ -794,7 +794,7 @@ apt_install gcc g++ make pkg-config libc6-dev
 
 # Raspberry Pi core utilities (vcgencmd, pinctrl, vclog, vcmailbox).
 apt_install_first raspi-utils-core libraspberrypi-bin
-apt_install raspi-gpio raspi-config
+apt_install raspi-gpio raspi-config piclone
 
 # GPIO for C on the Pi 5: the RP1 southbridge means bcm2835/wiringPi/pigpio
 # no longer apply. libgpiod is the supported character-device API; lgpio is
@@ -1152,7 +1152,7 @@ cat >"$HOME/.config/openbox/menu.xml" <<'EOF'
   <item label="Terminal">      <action name="Execute"><command>urxvt</command></action></item>
   <item label="Web Browser">   <action name="Execute"><command>vimb</command></action></item>
   <item label="Files">         <action name="Execute"><command>pcmanfm-qt</command></action></item>
-  <item label="Text Editor">   <action name="Execute"><command>l3afpad</command></action></item>
+  <item label="Text Editor">   <action name="Execute"><command>featherpad</command></action></item>
   <separator/>
   <item label="PDF Viewer">    <action name="Execute"><command>mupdf</command></action></item>
   <item label="Image Viewer">  <action name="Execute"><command>feh</command></action></item>

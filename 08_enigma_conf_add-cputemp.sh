@@ -18,12 +18,12 @@ cat >> "$CONF" <<EOF
 
 [$ID]
 alignment=Right
-type=customcommand
-command=awk '{printf "%.1f°C", \$1/1000}' /sys/class/thermal/thermal_zone0/temp
+command="sh -c \"top -bn2 -d1 | grep 'Cpu(s)' | tail -1 | awk '{printf \\\"%.0f%%\\\", 100-\\$8}'\""
 repeat=true
 repeatTimer=5
 runOnStartup=true
 text=CPU %1
+type=customcommand
 EOF
 
 nohup lxqt-panel >/dev/null 2>&1 &

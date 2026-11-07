@@ -336,6 +336,30 @@ mv -f -- "$TMP" "$PANEL" || { print_error "Could not write ${PANEL}"; exit 1; }
 trap - EXIT
 print_status "Set categoriesAtRight=${VALUE} in ${PANEL}"
 
+
+
+
+#$HOME/.config/lxqt//panel.conf
+section="worldclock"
+parameter="customFormat"
+value="<span style=font-size:12pt;>hh:mm</span>"
+
+configfile="$HOME/.config/lxqt/panel.conf"
+
+printf ".\n.\n"
+print_status "Configuration of [ worldclock ] BEGIN..."
+printf ".\n.\n"
+
+crudini --set "$configfile" "$section" "$parameter" "$value"
+
+printf ".\n.\n"
+print_status "Configuration of [ worldclock ] END..."
+printf ".\n.\n"
+
+
+
+
+
 # ---------------------------------------------------------------------------
 # Start the panel again
 # ---------------------------------------------------------------------------

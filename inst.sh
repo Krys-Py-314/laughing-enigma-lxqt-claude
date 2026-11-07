@@ -6,6 +6,6 @@ sudo /bin/cp -f ./enigma_bashrc $HOME/.bashrc
 ./04_enigma_conf_featherpad.sh
 ./05_enigma_conf_pcmanfm-qt.sh
 ./06_enigma_conf_qterminal.sh
-./07_enigma_conf_lxqt_panel_left.sh
+./07_enigma_conf_lxqt_panel.sh
 ./08_enigma_conf_add-cputemp.sh
 ./10_enigma_lgpio-setup.sh

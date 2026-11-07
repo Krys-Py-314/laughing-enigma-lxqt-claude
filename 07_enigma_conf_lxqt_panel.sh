@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# vs_lxqt_panel_left.sh
+# enigma_conf_lxqt_panel.sh
 #
 # Sets the LXQt Fancy Menu option "Categories Position" to Left
 # (Fancy Menu Settings > Categories Position) and renames some menu entries,
 # on Debian Trixie / Raspberry Pi 5.
 #
-#     chmod +x vs_lxqt_panel_left.sh
-#     ./vs_lxqt_panel_left.sh                   # categories left + renames
-#     ./vs_lxqt_panel_left.sh --right           # categories back on the right
-#     ./vs_lxqt_panel_left.sh --no-rename       # only move the categories
-#     ./vs_lxqt_panel_left.sh --restore-names   # undo the renames only
+#     chmod +x enigma_conf_lxqt_panel.sh
+#     ./enigma_conf_lxqt_panel.sh                   # categories left + renames
+#     ./enigma_conf_lxqt_panel.sh --right           # categories back on the right
+#     ./enigma_conf_lxqt_panel.sh --no-rename       # only move the categories
+#     ./enigma_conf_lxqt_panel.sh --restore-names   # undo the renames only
 #
 # Renamed entries:
 #     Accessories  : FeatherPad              -> Text Editor (Featherpad)
@@ -82,7 +82,7 @@ DO_POSITION=1
 DO_RENAME=1
 RESTORE_NAMES=0
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
-MARKER="X-Renamed-By=vs_lxqt_panel_left.sh"
+MARKER="X-Renamed-By=enigma_conf_lxqt_panel.sh"
 
 # desktop file IDs to try | program in Exec= (fallback search) | new label
 RENAMES=(
@@ -331,12 +331,6 @@ if [ "$BAD" = "1" ] || [ ! -s "$TMP" ]; then
     exit 1
 fi
 
-chmod --reference="$PANEL" "$TMP" 2>/dev/null || chmod 0644 "$TMP"
-mv -f -- "$TMP" "$PANEL" || { print_error "Could not write ${PANEL}"; exit 1; }
-trap - EXIT
-print_status "Set categoriesAtRight=${VALUE} in ${PANEL}"
-
-
 
 
 #$HOME/.config/lxqt//panel.conf
@@ -344,7 +338,44 @@ section="worldclock"
 parameter="customFormat"
 value="<span style=font-size:12pt;>hh:mm</span>"
 
+
 configfile="$HOME/.config/lxqt/panel.conf"
+configclock=="$HOME/.config/lxqt/clock.conf"
+
+crudini --del "$configfile" "$section"
+
+cat >> "$configclock" <<EOF
+[worldclock]
+autoRotate=true
+customFormat="'<b>'HH:mm:ss'</b><br/><font size=\"-2\">'ddd, d MMM yyyy'<br/>'TT'</font>'"
+dateFormatType=custom
+dateLongNames=false
+datePadDay=false
+datePosition=below
+dateShowDoW=false
+dateShowYear=false
+defaultTimeZone=
+formatType=short-timeonly
+showDate=true
+showTimezone=false
+showTooltip=false
+showWeekNumber=true
+timeAMPM=false
+timePadHour=false
+timeShowSeconds=false
+timeZones\size=0
+timezoneFormatType=iana
+timezonePosition=below
+useAdvancedManualFormat=false
+EOF
+
+crudini  --merge "$configfile" < "$configclock" 
+
+#crudini --set "$configfile" "$section" param1 "value1" \
+#        --set "$configfile" "$section" param2 "value2" \
+#        --set "$configfile" "$section" param3 "value3"
+
+
 
 printf ".\n.\n"
 print_status "Configuration of [ worldclock ] BEGIN..."
@@ -357,6 +388,12 @@ print_status "Configuration of [ worldclock ] END..."
 printf ".\n.\n"
 
 
+
+
+chmod --reference="$PANEL" "$TMP" 2>/dev/null || chmod 0644 "$TMP"
+mv -f -- "$TMP" "$PANEL" || { print_error "Could not write ${PANEL}"; exit 1; }
+trap - EXIT
+print_status "Set categoriesAtRight=${VALUE} in ${PANEL}"
 
 
 

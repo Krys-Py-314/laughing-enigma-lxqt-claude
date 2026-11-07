@@ -90,7 +90,7 @@ SKIP_TRIM="${SKIP_TRIM:-0}"
 ASSUME_YES="${ASSUME_YES:-0}"
 
 # Interface font size, applied to Qt/LXQt, GTK, Openbox and urxvt alike.
-FONT_SIZE=12
+FONT_SIZE=10
 
 # Desktop background colour requested: R:56 G:60 B:72
 BG_COLOR="#383C48"
@@ -604,7 +604,7 @@ sudo mkdir -p "$NF_DIR"
 NF_BASE="https://github.com/ryanoasis/nerd-fonts/releases/latest/download"
 NF_TMP="$(mktemp -d)"
 
-for z in UbuntuMono Ubuntu; do
+for z in UbuntuMono Ubuntu 0xProto; do
     if [ -n "$(sudo find "$NF_DIR" -iname "${z}*Nerd*" -print -quit 2>/dev/null)" ]; then
         print_status "${z} Nerd Font already present, skipping download."
         continue

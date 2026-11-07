@@ -7,5 +7,5 @@ sudo /bin/cp -f ./enigma_bashrc $HOME/.bashrc
 ./05_enigma_conf_pcmanfm-qt.sh
 ./06_enigma_conf_qterminal.sh
 ./07_enigma_conf_lxqt_panel.sh
-./08_enigma_conf_add-cputemp.sh
+#./08_enigma_conf_add-cputemp.sh
 ./10_enigma_lgpio-setup.sh

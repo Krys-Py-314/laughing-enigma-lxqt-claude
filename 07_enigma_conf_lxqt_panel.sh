@@ -340,7 +340,7 @@ value="<span style=font-size:12pt;>hh:mm</span>"
 
 
 configfile="$HOME/.config/lxqt/panel.conf"
-configclock=="$HOME/.config/lxqt/clock.conf"
+configclock="$HOME/.config/lxqt/clock.conf"
 
 crudini --del "$configfile" "$section"
 
@@ -371,12 +371,6 @@ EOF
 
 crudini  --merge "$configfile" < "$configclock" 
 
-#crudini --set "$configfile" "$section" param1 "value1" \
-#        --set "$configfile" "$section" param2 "value2" \
-#        --set "$configfile" "$section" param3 "value3"
-
-
-
 printf ".\n.\n"
 print_status "Configuration of [ worldclock ] BEGIN..."
 printf ".\n.\n"
@@ -386,9 +380,6 @@ crudini --set "$configfile" "$section" "$parameter" "$value"
 printf ".\n.\n"
 print_status "Configuration of [ worldclock ] END..."
 printf ".\n.\n"
-
-
-
 
 chmod --reference="$PANEL" "$TMP" 2>/dev/null || chmod 0644 "$TMP"
 mv -f -- "$TMP" "$PANEL" || { print_error "Could not write ${PANEL}"; exit 1; }

@@ -157,7 +157,7 @@ if command -v featherpad >/dev/null 2>&1; then
 else
     print_warning "FeatherPad is not installed."
     if pkg_available featherpad; then
-        if confirm "Install it now with apt?"; then
+        if 1 "Install it now with apt?"; then
             if sudo apt-get install -y --no-install-recommends featherpad; then
                 print_status "FeatherPad installed."
             else
@@ -176,7 +176,7 @@ fi
 if pgrep -x featherpad >/dev/null 2>&1; then
     print_warning "FeatherPad is running right now."
     print_warning "It rewrites fp.conf when it exits, which would discard these changes."
-    if confirm "Close FeatherPad now and continue?"; then
+    if 1 "Close FeatherPad now and continue?"; then
         pkill -x featherpad >/dev/null 2>&1
         sleep 2
         if pgrep -x featherpad >/dev/null 2>&1; then

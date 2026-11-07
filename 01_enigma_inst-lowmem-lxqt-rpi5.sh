@@ -545,7 +545,9 @@ apt_install openbox obconf-qt
 banner "09 - Terminal, file manager, text editor"
 # ===========================================================================
 
-apt_install rxvt-unicode pcmanfm-qt l3afpad
+apt_install  pcmanfm-qt 
+# rxvt-unicode
+# l3afpad
 
 # ===========================================================================
 banner "10 - Media: PDF viewer, image viewer, video player, screen recorder"
@@ -1405,7 +1407,7 @@ else
     print_warning "About to replace OpenSSH with dropbear on port 22."
     print_warning "If you are connected over SSH right now, your session may drop."
     print_warning "Reconnect afterwards with the same user, password or ~/.ssh/authorized_keys."
-    if confirm "Proceed with the OpenSSH -> dropbear swap?"; then
+    if 1 "Proceed with the OpenSSH -> dropbear swap?"; then
 
         # The Debian package split changed: dropbear-run was dropped in
         # 2022.83-3, and the 'dropbear' package itself now ships the startup
@@ -1647,7 +1649,8 @@ if [ "${#FAILED_STEPS[@]}" -gt 0 ]; then
 else
     print_status "All steps completed without errors."
 fi
-
+sudo apt-get -y autoremove --purge >>"$LOGFILE" 2>&1 || true
+sudo apt-get -y clean >>"$LOGFILE" 2>&1 || true
 print_status " "
 if [ "$REBOOT_NEEDED" = "1" ]; then
     print_warning "A REBOOT IS REQUIRED for the 4 KB-page kernel / zram to take effect:"

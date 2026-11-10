@@ -1,0 +1,510 @@
+# inst-lowmem-lxqt-rpi5.sh
+
+A minimal-memory LXQt + Openbox desktop for the **Raspberry Pi 5** on top of
+**Raspberry Pi OS Lite 64-bit** (Bookworm or Trixie), tuned for the **2 GB**
+model. It replaces `inst-min-lxqt-rpi5.sh`: same desktop, plus the memory fixes
+described below.
+
+```bash
+bash inst-lowmem-lxqt-rpi5.sh
+```
+
+**No `sudo` needed.** Run it as your normal user; it asks for your password
+once and calls `sudo` itself where root is required, keeping the credentials
+alive for the whole run. If you do start it with `sudo`, it re-runs itself as
+your user, so all the files under `$HOME` still end up owned by you. Logging in
+as `root` itself is refused. Everything is logged to
+`~/.inst-lowmem-lxqt-rpi5.log`.
+
+## Why this script exists: Pi 5 vs Pi Zero 2 W memory
+
+The same desktop reported ~127 MB used on a Pi Zero 2 W and ~486 MB on a Pi 5.
+Most of that gap is not LXQt. It comes from how the Pi 5 is set up out of the
+box, and the script fixes each cause:
+
+| Step | Fix | Why it saves memory |
+|---|---|---|
+| 03 | `kernel=kernel8.img` in `config.txt` | The Pi 5 kernel (`kernel_2712.img`) uses 16 KB pages, so every allocation is rounded up to 16 KB. `kernel8.img` uses 4 KB pages, like the Zero 2 W. Costs a few percent of CPU speed in some workloads. |
+| 04 | zram swap (half of RAM, zstd) | Idle pages are compressed in RAM to roughly a third instead of forcing out cache or hitting the SD card. Skipped if zram is already active or `rpi-swap` manages swap. |
+| 06 | glamor off (`AccelMethod none`) | Stops Xorg loading the Mesa GPU driver and keeping GPU buffers in RAM. Raspberry Pi OS already does this on the Pi 0–3. |
+| 06 | resolution cap (default 1920x1080) | Framebuffers and window buffers scale with pixel count; 4K costs ~4x the memory of 1080p. Only ever steps a screen *down*, and only to a mode the monitor offers. |
+| 25 | `memcheck` command | Shows page size, resolution, glamor state, swap, `free -h`, the key `/proc/meminfo` lines and the top processes. |
+
+The kernel change and a freshly configured zram need a **reboot**; the script
+says so at the end. After rebooting, log in to the desktop and run `memcheck`.
+After a kernel update, run it again: the page size must still read `4096`.
+
+What turning glamor off costs: OpenGL programs, and mpv's default video output,
+render in software. A panel, terminal and file manager do not notice. Use
+`KEEP_GLAMOR=1` if you play a lot of video.
+
+The glamor option lives in `/etc/X11/xorg.conf.d/99-vc4.conf`, in the
+`OutputClass` that already selects the Pi 5's vc4 display device. A separate
+`Device` section (the manual recipe) risks Xorg picking the display-less v3d
+card and starting with no screen, so a hand-made `20-noglamor.conf` is moved
+aside to `20-noglamor.conf.disabled`.
+
+## Flags
+
+| Variable | Effect |
+|---|---|
+| `SKIP_KERNEL4K=1` | Keep the 16 KB-page Pi 5 kernel |
+| `KEEP_GLAMOR=1` | Leave glamor (GPU acceleration in Xorg) on |
+| `MAX_RES=WxH` | Resolution cap applied at login (default `1920x1080`; `off` disables it) |
+| `SKIP_ZRAM=1` | Do not set up zram swap |
+| `SKIP_SSH_SWAP=1` | Keep OpenSSH; do not install or switch to dropbear |
+| `SKIP_PI_APPS=1`  | Skip Pi-Apps, Min and Geany Dark Mode |
+| `SKIP_TRIM=1`     | Do not disable triggerhappy |
+| `ASSUME_YES=1`    | Never prompt (unattended run) |
+
+## What gets installed
+
+| Role | Choice | Why |
+|---|---|---|
+| Session | `lxqt-session` + hand-picked modules | No `lxqt-core` metapackage — it drags in power management, admin tools and an about box |
+| WM | Openbox, custom `SquareDark` theme | Flat, 1px, square borders; no rounding, no shadows, no compositor |
+| Login | **No display manager** — `startx` from tty1 | A DM is a permanently resident process for one login a day |
+| Desktop | `xsetroot -solid #383C48` | No `pcmanfm-qt --desktop` process, no wallpaper decode, no desktop icons |
+| Terminal | urxvt | Lightest X11 terminal with real Xft/Nerd Font support and no tabs |
+| Browser | vimb | WebKit, keyboard-driven, far lighter than Chromium |
+| Files | pcmanfm-qt | Requested; Qt libs are already resident under LXQt |
+| Editor | l3afpad | GTK3 Leafpad fork; `leafpad` and `edit` are aliased to it |
+| PDF | mupdf | Single binary, ~30 MB RSS, no poppler stack |
+| Images | feh | ~10 MB RSS |
+| Video | mpv | Reuses the ffmpeg libs already pulled in |
+| Recorder | `screenrec` (ffmpeg x11grab wrapper) | Zero resident memory when not recording, unlike any GUI recorder |
+| Screenshots | scrot | Makes Openbox's stock `Alt+Print` binding work (~60 KB) |
+| Icons | Numix-Circle | Circular app icons, dark Numix folder icons |
+| Fonts | Ubuntu + UbuntuMono Nerd Font, size 12 | Applied to fontconfig, Qt/LXQt, GTK2, GTK3 and urxvt |
+| SSH | dropbear replaces OpenSSH | ~1 MB resident vs ~8 MB |
+| Prompt | oh-my-posh | Requested |
+| Dev | gcc, g++, make, libgpiod, raspi-utils-core, git, curl | See GPIO note below |
+| Editor (dev) | geany | Installed in step 22 as an ordered prerequisite: "Geany Dark Mode" only recolours an existing Geany and fails without it |
+
+Printing is pinned out entirely (`Pin-Priority: -1` on cups and
+`printer-driver-*`), and `APT::Install-Recommends "false"` is set so nothing
+pulls in a print stack or other optional weight by accident.
+
+## Deviations from the request — please read
+
+1. **`rasp-utils-core` → `raspi-utils-core`.** The requested spelling does not
+   exist. `raspi-utils-core` is the real package (`vcgencmd`, `pinctrl`,
+   `vclog`, `vcmailbox`).
+2. **`leafpad='l3apad'` → `l3afpad`.** The alias target in the request was a
+   typo for the binary that is actually installed.
+3. **"Imager app" was read as *image viewer*** (feh), since it was listed
+   alongside the PDF and video viewers. If you meant the SD-card flashing tool,
+   that is `sudo apt install rpi-imager` — say the word and I will add it.
+4. **`Min` contradicts the minimum-memory goal.** It is an Electron browser
+   (~250–400 MB RSS with one tab open) — the single heaviest thing in this
+   build. It is installed as requested, and the script prints a warning when it
+   does. Vimb remains the low-memory browser.
+5. **vimb is not in Bookworm.** It entered Debian at Trixie (3.7.0, arm64). On
+   Trixie the script installs it with apt; on Bookworm it builds from source
+   against whichever WebKitGTK dev package is present (4.1 or 4.0).
+6. **fastfetch is not in Bookworm** either. On Trixie it comes from apt; on
+   Bookworm the script falls back to the official `fastfetch-linux-aarch64.deb`
+   GitHub release.
+7. **The dropbear swap is guarded.** It is the last step, it asks first, and it
+   only purges `openssh-server` *after* confirming something is listening on
+   port 22 — otherwise it re-enables OpenSSH so you cannot be locked out.
+   If you are running over SSH, your current session may still drop.
+8. **`openssh-client` is kept on purpose.** It is not a daemon, so it costs no
+   resident memory, and `ssh`/`scp`/`ssh-keygen` out of the Pi keep working —
+   git, rsync and ansible all invoke `/usr/bin/ssh` by name, and `dbclient` is
+   not a drop-in replacement. Only the *server* is removed.
+
+## Notes that will bite you later
+
+- **urxvt and high-plane Nerd Font glyphs.** Unless Debian built
+  `rxvt-unicode` with `--enable-unicode3`, it cannot render codepoints above
+  U+FFFF. The classic Powerline/PUA icons (U+E000–F8FF) that oh-my-posh uses
+  are fine; the Material Design range (U+F0001+) will not display. Check with
+  `urxvt --help 2>&1 | grep -i unicode3`.
+- **libgpiod v1 vs v2.** Bookworm ships 1.6, Trixie ships 2.x, and the C API is
+  not source-compatible between them. `~/dev/README-GPIO.md` is written during
+  install with the details and build commands.
+- **Pi 5 GPIO.** `wiringPi`, `bcm2835` and `pigpio` poke SoC registers directly
+  and do **not** work on the Pi 5's RP1 southbridge. Use libgpiod, lgpio, or
+  `pinctrl`.
+- **How much dropbear actually saves depends on how sshd is started.** Under
+  `ssh.service` (Bookworm) a listener is resident from boot at ~5–8 MB, so the
+  swap is a real idle win. Under `ssh.socket` (Debian moved to socket
+  activation in Trixie) systemd holds the port and no sshd is resident while
+  idle, so the idle saving is ~0 and dropbear only wins per connection
+  (~5–10 MB per sshd session vs ~1–2 MB). Step 24 detects which model your
+  image uses, says so before asking, and prints the measured before/after RSS
+  rather than assuming a win.
+- **`Geany Dark Mode` needs Geany installed first.** The Pi-Apps app only
+  writes theme files into Geany's config — it does not install the editor, and
+  fails outright when it is absent. Step 22 installs `geany` before the
+  Pi-Apps loop and skips the theme with a clear message if that install did not
+  succeed, rather than letting Pi-Apps fail opaquely. Both live inside the
+  `SKIP_PI_APPS` guard, so skipping Pi-Apps skips geany too.
+- **`dropbear-run` no longer exists.** It was dropped from Debian in dropbear
+  2022.83-3; on Trixie the `dropbear` package itself ships the startup files.
+  `dropbear-bin` provides `/usr/sbin/dropbear` and *nothing that starts it*, so
+  installing only that leaves a machine with the binary present, no init
+  script, and no SSH server after the next reboot. Step 24 installs `dropbear`
+  plus `dropbear-bin`, falls back to `dropbear-run` for older releases, and
+  refuses to touch OpenSSH unless a service or init script actually exists.
+- **dropbear's init layout varies by release**, and `systemctl enable` behaves
+  differently on each: `dropbear.socket` + `dropbear@.service` (socket
+  activated), a plain `dropbear.service`, or just `/etc/init.d/dropbear` wrapped
+  by systemd — where `enable` can fail on a generated unit that starts
+  perfectly well. Step 24 therefore treats "enabled at boot" and "running now"
+  as separate questions and decides success from **which process actually holds
+  port 22**, not from any command's exit status. Under socket activation a
+  reading of `dropbear resident: 0 kB` is correct rather than a failure.
+- **Running now is not the same as running after a reboot.** Where dropbear
+  starts from a sysvinit script, systemd may refuse to `enable` it, leaving a
+  working machine with no SSH server on the next boot. Step 24 checks this
+  separately and prints the `update-rc.d` fix if persistence is missing.
+- **avahi-daemon is left running on purpose.** It publishes the Pi as
+  `<hostname>.local` over mDNS, so `ssh pi@raspberrypi.local` keeps working.
+  Turning it off in the same run that swaps the SSH server (step 24) would mean
+  reconnecting to a changed daemon at an address that no longer resolves. The
+  only service the script disables is **triggerhappy**, a console hotkey daemon
+  that Raspberry Pi OS enables with no triggers configured and that LXQt
+  replaces with `lxqt-globalkeys` and Openbox's `rc.xml`.
+- **No desktop icons.** That is the direct cost of not running a desktop
+  process. If you want them, drop the `Hidden=true` override in
+  `~/.config/autostart/` and enable pcmanfm-qt's desktop — it is already
+  configured for `#383C48` with no wallpaper.
+- **X autostart does not use `exec`.** With console autologin, `exec startx`
+  would end the login session whenever X died and the getty would log straight
+  back in and retry, looping with no console to fix it from. Keeping the parent
+  shell costs ~3 MB and always leaves a usable prompt.
+
+## Verification performed
+
+The script was static-checked and its generated output exercised before
+release. Note this ran on an x86 Ubuntu container, **not** on a Pi:
+
+- `bash -n` and `shellcheck` clean at `style` level (excluding SC2024, which
+  flags user-owned log redirects under `sudo`, and SC2088, tildes inside
+  human-readable messages).
+- Unit tests for the package-existence guard: real packages accepted, phantom
+  packages rejected and recorded rather than passed to apt, and apt not invoked
+  at all when nothing in a group is available. This is what keeps the run free
+  of `Unable to locate package` errors.
+- `write_block` idempotency: running three times leaves exactly one block and
+  preserves pre-existing file content.
+- Config generation replayed into a throwaway `$HOME`: `rc.xml` and `menu.xml`
+  validated with `xmllint`, `.Xresources` parsed by `xrdb -n` (37 resources),
+  `.desktop` files validated with `desktop-file-validate`, `.bashrc` sourced to
+  confirm the six aliases (`ll`, `la`, `edit`, `leafpad`, `hh`, `hl`) and the
+  PATH entry.
+- **Openbox was actually started under Xvfb** with the generated theme, rc.xml
+  and menu.xml, and came up with no warnings or errors.
+
+Five real bugs were found and fixed this way: an unquoted `#` in a `.desktop`
+`Exec` (a reserved character the spec rejects), a dangling
+`/var/lib/openbox/debian-menu.xml` reference inherited from Debian's stock
+rc.xml that warned on every start, a dropbear fallback that could never fire
+because the installer treats an absent package as success, the `exec startx`
+login-loop hazard described above, and a pair of aliases written with
+typographic quotes (U+2018/U+2019), which bash cannot parse — the generated
+`~/.bashrc` aborted at that line and everything below it, including the
+oh-my-posh prompt block, silently never ran.
+
+### What the first hardware run found
+
+The original `inst-min-lxqt-rpi5.sh` has since been run on Raspberry Pi OS
+(Trixie, arm64) on a Pi 5. It completed, with a single failure — step 22 (now
+step 24), `Failed to enable unit: Unit dropbear.service does not exist` — which
+took three attempts to diagnose correctly:
+
+1. Guessed socket activation. Wrong: no `dropbear.socket` existed.
+2. Guessed a unit-naming difference and required a unit file to be present.
+   Worse — that would have reported failure on a sysvinit-only layout where
+   dropbear was serving perfectly well.
+3. The install log settled it: only `dropbear-bin`, `libtomcrypt1` and
+   `libtommath1` were installed. `dropbear-run` was dropped from Debian in
+   2022.83-3 and the `dropbear` package now ships the startup files, so nothing
+   provided a service. The binary-presence probe passed and hid it.
+
+Two fixes came out of that, both worth keeping: the step decides from **which
+process owns port 22** rather than from a command's exit status, and it
+verifies a service or init script exists before touching OpenSSH at all.
+
+**Still not verified:** the fixes made after that run have not themselves been
+re-run on hardware, and the Bookworm-only fallback paths — the vimb source
+build and the fastfetch `.deb` download — stay untested, since Trixie packages
+both.
+
+### The low-memory additions (`inst-lowmem-lxqt-rpi5.sh`)
+
+Checked in the same x86 container, **not yet on a Pi**:
+
+- `bash -n` clean; `shellcheck` adds nothing beyond the SC2024/SC2088 pattern
+  above. The two generated helpers (`cap-resolution`, `memcheck`) are
+  shellcheck-clean.
+- `cap-resolution` against recorded `xrandr` output: a 4K + 1080p pair steps
+  only the 4K output down; a 1366x768 screen is left alone, and so is its
+  interlaced `1920x1080i` mode; a 4K monitor with no 1080p mode is left alone;
+  `off` does nothing.
+- The `config.txt` block writer, run three times: one block, no blank lines
+  piling up, and the `[all]` header keeps a preceding `[cm5]` filter from
+  hiding `kernel=kernel8.img`.
+- Started as root with `SUDO_USER` set, the script re-ran as that user (its
+  log file belonged to the user) and stopped cleanly at the sudo check. Started
+  as plain root, it refused.
+
+Not verified: the real Pi 5 boot on `kernel8.img`, Xorg honouring
+`AccelMethod` from the `OutputClass`, and zram starting. On a Pi, `memcheck`
+confirms all three.
+
+## Second pass: `inst_dark_theme_and_icons.sh`
+
+Run **after** `inst-lowmem-lxqt-rpi5.sh` to apply a dark theme, Papirus icons and
+a configured panel:
+
+```bash
+chmod +x inst_dark_theme_and_icons.sh
+./inst_dark_theme_and_icons.sh
+```
+
+| Variable | Effect |
+|---|---|
+| `NO_DESKTOP=1` | Do not enable the PCManFM-Qt desktop process |
+| `NO_APPLETS=1` | Do not install the system tray applications |
+| `ASSUME_YES=1` | Never prompt (unattended run) |
+
+Output is logged to `~/inst_dark_theme_and_icons.log`.
+
+| Setting | Value |
+|---|---|
+| GTK 2 / GTK 3 | Arc-Dark, `prefer-dark` on |
+| Icons | Papirus-Dark |
+| Qt widget style | `kvantum-dark`, dark Kvantum engine theme auto-selected |
+| LXQt theme | `kvantum` (shipped by `lxqt-themes`) |
+| Openbox | generated `Arc-Dark-Square` — square 1px borders |
+| Font | Ubuntu Nerd Font 10, Normal |
+| Panel | 32 px tall, 22 px icons, bottom, raspberry menu icon |
+| Menu | Fancy Menu, categories in a left column (falls back to `mainmenu`) |
+| Tray applets | lxqt-powermanagement, nm-applet, qlipper, lxqt-notificationd |
+| Desktop | PCManFM-Qt, 48×48 icons, Sans 11 labels, white on `#383C48` |
+| File manager | detailed list view, hidden files shown |
+
+### Three things the spec asked for that needed a decision
+
+1. **`arc-theme` ships no Openbox theme** — only GTK2/3/4, metacity and xfwm4.
+   So "Openbox borders in Arc-Dark" cannot be done by installing it. The script
+   generates `Arc-Dark-Square` from Arc-Dark's own palette instead.
+2. **Arc-Dark does not vary the titlebar background** between active and
+   inactive — it uses `#2F343F` for both and distinguishes them by text colour.
+   The requested "dark active, very dark inactive" therefore uses two authentic
+   Arc-Dark values: `#383C4A` (background) active, `#2F343F` (headerbar)
+   inactive, so nothing clashes with the GTK theme.
+3. **The icon theme was specified twice, differently** — "Papirus black dark"
+   in one place, "Numix Circle" in the Config Center block. Papirus-Dark is
+   applied; Numix-Circle stays installed and selectable in `lxqt-config`.
+
+### The Nord Openbox theme (reference VM)
+
+Not used by the script, recorded so the provenance is not lost. The Nord
+Openbox theme on the reference VM came from
+<https://gitlab.com/the-zero885/nord-openbox-theme> — downloaded as a `.tar.gz`
+to `$HOME/Downloads` and extracted, which yields a folder named
+`Nord-Openbox`. That folder was copied to `/usr/share/themes/` **and renamed
+to `Nord`**, which is why ObConf lists the theme as `Nord`. It is not in the
+Debian archive, so it cannot be `apt install`ed.
+
+To reproduce it on the Pi:
+
+```bash
+cd ~/Downloads
+tar xzf nord-openbox-theme-*.tar.gz
+sudo cp -r Nord-Openbox /usr/share/themes/Nord    # the rename matters
+openbox --reconfigure
+```
+
+The rename is not cosmetic: Openbox derives the theme name from the directory,
+so `rc.xml` must contain `<name>Nord</name>` to match. Naming a theme that does
+not exist makes Openbox fall back to its default *silently* — the same failure
+mode as the Arc-Dark problem above. Verify with
+`ls -d /usr/share/themes/*/openbox-3`.
+
+### Other notes
+
+- **Kvantum's packaging changed in Trixie.** It is now one version-agnostic
+  `qt-style-kvantum` serving both Qt5 and Qt6, with the themes merged into
+  `qt-style-kvantum-themes`; `qt5-style-kvantum` and `qt6-style-kvantum` are
+  transitional dummies, and the versioned `*-themes` packages are gone. The
+  script prefers the unified names and falls back to the split ones on Bookworm
+  and earlier — asking only for the versioned packages on Trixie would pull the
+  engine in through the dummies but install no themes at all.
+- **`tray` and `statusnotifier` are hosts, not containers.** They display
+  whatever applications register an icon with them, so nothing appears in
+  either one when the applications are not installed or not autostarted — no
+  panel setting adds entries. Step 10 installs `lxqt-powermanagement`,
+  `network-manager-gnome` (nm-applet), `qlipper` and `lxqt-notificationd` and
+  makes sure they autostart, including removing the `Hidden=true` stub the base
+  script wrote to suppress power management. That is roughly 50–70 MB RSS, so
+  `NO_APPLETS=1` skips it.
+- **Neither the clock nor the keyboard indicator has a font setting.** It is an
+  open upstream issue ([lxqt-panel#967](https://github.com/lxqt/lxqt-panel/issues/967)).
+  The clock is sized through HTML in its `customFormat`, which upstream
+  supports. The `font` key written for `kbindicator` is best-effort: if your
+  version ignores it, the only other lever is the LXQt Qt font, which resizes
+  every panel plugin at once.
+- **pcmanfm-qt's view mode key is `Mode` in `[FolderView]`**, not `ViewMode` in
+  `[Window]`. The latter is not a pcmanfm-qt key at all — QSettings preserves
+  unknown keys when it rewrites the file, so it survives in `settings.conf` and
+  looks accepted while doing nothing. An earlier version of the base script set
+  exactly that and had no effect. Hidden files are split in two: `[Desktop]
+  ShowHidden` for the desktop, `[FolderView] ShowHidden` for file manager
+  windows; both are now `true`.
+- **Categories on the left needs the Fancy Menu plugin, not a setting.** The
+  classic `mainmenu` has no layout option whatsoever — its settings cover icon,
+  button text, font size, menu file, shortcut and search, and its categories
+  are always hover submenus. `fancymenu` (LXQt 2.0+, the default menu since
+  LXQt 2.0) draws categories as a column and exposes `categoriesAtRight`
+  (`false` = left) and `buttonsAtTop`. The script prefers `fancymenu` when
+  `/usr/share/lxqt/lxqt-panel/fancymenu.desktop` exists and falls back to
+  `mainmenu` with a warning otherwise.
+- **A custom menu icon needs `ownIcon=true`, not just `icon=`.** Both menu
+  plugins gate the icon path behind that boolean, so setting `icon` alone is
+  silently ignored and the default icon stays. An earlier version of this
+  script did exactly that.
+- **`lxqt-panel` has no separator plugin.** Each requested "Separator" is a
+  fixed 8 px `spacer`, which is the conventional stand-in.
+- **Debian ships no `.desktop` file for urxvt**, so the script writes one into
+  `~/.local/share/applications/` for the Quick Launch entry.
+- **Enabling the desktop reverses a base-script decision.** `inst-lowmem-lxqt-rpi5.sh`
+  deliberately ran no desktop process and painted the background with
+  `xsetroot`. Desktop icons cost roughly 30–45 MB RSS; `NO_DESKTOP=1` keeps the
+  lighter arrangement and just writes the settings.
+- **Run it from a TTY if you can.** LXQt rewrites `lxqt.conf` and `panel.conf`
+  when the session exits, so editing them under a live session means logout
+  reverts the changes. The script detects a running session and warns.
+- `rc.xml` and `panel.conf` are backed up with a timestamp before being changed.
+
+## FeatherPad: `conf_featherpad.sh`
+
+Configures FeatherPad. Standalone — it does not depend on the other two
+scripts.
+
+```bash
+chmod +x conf_featherpad.sh
+./conf_featherpad.sh
+```
+
+| Variable | Effect |
+|---|---|
+| `BG_VALUE=<0-50>` | Dark background shade (default 40) |
+| `ASSUME_YES=1` | Never prompt (unattended run) |
+
+Writes to **`~/.config/featherpad/fp.conf`**:
+
+| Section | Key | Value |
+|---|---|---|
+| `[text]` | `lineNumbers` | `true` |
+| `[text]` | `darkColorScheme` | `true` |
+| `[text]` | `darkBgColorValue` | `40` (range 0–50, 0 blackest) |
+| `[window]` | `sysIcons` | `true` |
+
+### Two gotchas, both found by testing rather than reading
+
+1. **The section names are lowercase** — `[text]` and `[window]`. Capitalised
+   `[Text]`/`[Window]` sections are *silently ignored*: FeatherPad creates its
+   own lowercase sections, fills them with defaults, and the settings look
+   written while nothing changes. The first version of this script had it wrong
+   and appeared to succeed.
+2. **Booleans are `true`/`false`, never `yes`/`no`** — QSettings' INI format.
+
+### Two requested settings do not exist
+
+Checked against FeatherPad's `config.cpp` and `filedialog.h`:
+
+- **"default view = detailed list"** — FeatherPad hardcodes
+  `setViewMode(QFileDialog::Detail)`. It is *already* detailed list, and there
+  is no key to change it.
+- **"show hidden files"** — kept in a static variable for the lifetime of the
+  process, never written to any config file. Toggle with `Ctrl+H` (or `Alt+.`)
+  inside a dialog; it resets when FeatherPad quits.
+
+Both are file-dialog behaviours. The equivalent *file manager* settings belong
+to pcmanfm-qt, in `~/.config/pcmanfm-qt/lxqt/settings.conf`.
+
+### It merges, it does not overwrite
+
+An existing `fp.conf` is **updated in place**: only the four keys above change.
+Fonts, tab size, shortcuts, syntax colours, recent files, window geometry and
+everything else are left exactly as they were, ordering and blank lines
+included. If no `fp.conf` exists, one is created containing just those four
+keys and FeatherPad fills in its own defaults for the rest. A timestamped
+backup is taken before any change regardless.
+
+Demonstrated by diffing a 31-line, 4-section config before and after: only the
+four intended lines differ, and the line and section counts are unchanged.
+
+### Verification
+
+The script was run as a non-root user against a seeded `fp.conf`, then
+**FeatherPad itself was launched under Xvfb and closed**, and the file it wrote
+back was inspected. That round trip is what proved the keys are honoured — and
+what exposed the capitalisation bug. Also checked: unrelated existing settings
+survive, keys are never duplicated across repeat runs, a missing `fp.conf` is
+created correctly, and `BG_VALUE` rejects out-of-range and non-numeric input.
+
+FeatherPad rewrites its whole config on exit, so the script refuses to run
+while FeatherPad is open and offers to close it first. Existing configs are
+backed up with a timestamp.
+
+## Hide "QTerminal drop down": `hide_qterminal_drop.sh`
+
+Removes the **QTerminal drop down** entry from **System Tools** in the panel's
+Fancy Menu. The normal *QTerminal* entry stays. Standalone.
+
+```bash
+chmod +x hide_qterminal_drop.sh
+./hide_qterminal_drop.sh            # current user only
+./hide_qterminal_drop.sh --system   # all users (uses sudo)
+./hide_qterminal_drop.sh --undo     # show it again (add --system if hidden system-wide)
+```
+
+The entry comes from `/usr/share/applications/qterminal-drop.desktop`, owned by
+the `qterminal` package. That file is **not** edited or deleted, because the next
+`apt upgrade` of qterminal would put it back. Instead, a copy with
+`NoDisplay=true` is written to a directory the XDG menu spec searches first:
+`~/.local/share/applications/` (per user) or `/usr/local/share/applications/`
+(`--system`). A file ID in those directories overrides the packaged file with
+the same name, so the menu hides the entry. `qterminal --drop` still works from a
+shortcut or terminal. `--undo` only removes a file this script created.
+
+The menu usually updates straight away. If it does not, log out and back in.
+
+Verified with a freedesktop menu parser (pyxdg): the entry is listed under
+`System` before the script runs, absent after, and back after `--undo`.
+
+## After install
+
+```bash
+sudo reboot          # required after the kernel switch
+
+memcheck             # once logged in to the desktop
+```
+
+# inst-lgpio-rpi5.sh
+
+Installs the [lgpio](https://abyz.me.uk/lg/) GPIO library (C library and
+Python 3 module) on a **Raspberry Pi 5** running **Debian 13 Trixie**, starting
+from a bare system.
+
+```bash
+chmod +x inst-lgpio-rpi5.sh
+./inst-lgpio-rpi5.sh
+```
+
+It installs `liblgpio1`, `liblgpio-dev` and `python3-lgpio` from apt when
+available. If they aren't, it builds [joan2937/lg](https://github.com/joan2937/lg)
+from source into `/usr/local`. It also adds you to a `gpio` group and installs
+a udev rule so `/dev/gpiochip*` works without sudo once you log in again.
+
+| Variable | Effect |
+|---|---|
+| `FROM_SOURCE=1` | Always build from source instead of using apt |
+| `LG_REF=<branch>` | Upstream branch to build (default `master`) |
+| `SKIP_PYTHON=1` | Install only the C library |

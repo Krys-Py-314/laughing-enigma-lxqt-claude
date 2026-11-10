@@ -332,6 +332,10 @@ if [ "$BAD" = "1" ] || [ ! -s "$TMP" ]; then
 fi
 
 
+chmod --reference="$PANEL" "$TMP" 2>/dev/null || chmod 0644 "$TMP"
+mv -f -- "$TMP" "$PANEL" || { print_error "Could not write ${PANEL}"; exit 1; }
+trap - EXIT
+print_status "Set categoriesAtRight=${VALUE} in ${PANEL}"
 
 #$HOME/.config/lxqt//panel.conf
 section="worldclock"
@@ -346,27 +350,23 @@ crudini --del "$configfile" "$section"
 
 cat >> "$configclock" <<EOF
 [worldclock]
+type=worldclock
+alignment=Center
 autoRotate=true
-customFormat="'<b>'HH:mm:ss'</b><br/><font size=\"-2\">'ddd, d MMM yyyy'<br/>'TT'</font>'"
-dateFormatType=custom
-dateLongNames=false
-datePadDay=false
+showTimeZone=false
+is24h=true
+timeFormat=hh:mm
+timePadHour=true
+timeShowSeconds=false
+showTime=true
+showDate=true
+datePadDay=true
 datePosition=below
 dateShowDoW=false
 dateShowYear=false
-defaultTimeZone=
-formatType=short-timeonly
-showDate=true
+dateFormat=dd-MMM
 showTimezone=false
-showTooltip=false
 showWeekNumber=true
-timeAMPM=false
-timePadHour=false
-timeShowSeconds=false
-timeZones\size=0
-timezoneFormatType=iana
-timezonePosition=below
-useAdvancedManualFormat=false
 EOF
 
 crudini  --merge "$configfile" < "$configclock" 
@@ -380,12 +380,6 @@ crudini --set "$configfile" "$section" "$parameter" "$value"
 printf ".\n.\n"
 print_status "Configuration of [ worldclock ] END..."
 printf ".\n.\n"
-
-chmod --reference="$PANEL" "$TMP" 2>/dev/null || chmod 0644 "$TMP"
-mv -f -- "$TMP" "$PANEL" || { print_error "Could not write ${PANEL}"; exit 1; }
-trap - EXIT
-print_status "Set categoriesAtRight=${VALUE} in ${PANEL}"
-
 
 
 # ---------------------------------------------------------------------------

@@ -591,7 +591,7 @@ else
     print_warning "Fancy Menu not available (needs LXQt 2.0+); using the classic"
     print_warning "mainmenu, whose categories can only be hover submenus."
 fi
-
+MENU_PLUGIN="mainmenu"
 # lxqt-panel has no dedicated separator plugin; a small fixed spacer is the
 # conventional stand-in, so each requested "Separator" becomes one.
 cat >"$PANEL" <<EOF
@@ -683,21 +683,18 @@ showOnClicked=true
 type=worldclock
 alignment=Center
 autoRotate=true
-
 showTimeZone=false
 is24h=true
 timeFormat=hh:mm
 timePadHour=true
 timeShowSeconds=false
 showTime=true
-
 showDate=true
 datePadDay=true
 datePosition=below
 dateShowDoW=false
 dateShowYear=false
 dateFormat=dd-MMM
-
 showTimezone=false
 showWeekNumber=true
 

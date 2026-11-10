@@ -681,14 +681,42 @@ showOnClicked=true
 
 [worldclock]
 type=worldclock
-showWeekNumber=false
-formatType=custom
-useAdvancedManualFormat=true
-customFormat=<span style="font-size:${PANEL_CLOCK_FONT_PT}pt;">hh:mm</span>
+alignment=Center
+autoRotate=true
+
+showTimeZone=false
+is24h=true
+timeFormat=hh:mm
+timePadHour=true
+timeShowSeconds=false
+showTime=true
+
+showDate=true
+datePadDay=true
+datePosition=below
+dateShowDoW=false
+dateShowYear=false
+dateFormat=dd-MMM
+
+showTimezone=false
+showWeekNumber=true
 
 [quicklaunch2]
 type=quicklaunch
 EOF
+
+#[worldclock]
+#type=worldclock
+#showWeekNumber=false
+#formatType=custom
+#useAdvancedManualFormat=true
+#customFormat=<span style="font-size:${PANEL_CLOCK_FONT_PT}pt;">hh:mm</span>
+
+#[quicklaunch2]
+#type=quicklaunch
+#EOF
+
+
 
 # Fill the two quicklaunch plugins with whatever was actually found.
 ql_index=0

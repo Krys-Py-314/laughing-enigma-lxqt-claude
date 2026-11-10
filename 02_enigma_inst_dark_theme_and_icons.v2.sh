@@ -52,7 +52,7 @@ print_status "Starting Dark Theme and Icons Setup..."
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-LOGFILE="$HOME/inst_dark_theme_and_icons.log"
+LOGFILE="$HOME/.config/inst_dark_theme_and_icons.log"
 SKIPPED_PKGS=()
 FAILED_STEPS=()
 

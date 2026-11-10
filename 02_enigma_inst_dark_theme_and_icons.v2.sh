@@ -684,7 +684,7 @@ type=worldclock
 showWeekNumber=false
 formatType=custom
 useAdvancedManualFormat=true
-customFormat=<span style="font-size:${PANEL_CLOCK_FONT_PT}pt;">hh:mm</span>
+customFormat="'<span style=\"font-size:${PANEL_CLOCK_FONT_PT}pt;\">'HH:mm'</span><br/><font size=\"-2\">'dd/MM'</font>'"
 
 [quicklaunch2]
 type=quicklaunch

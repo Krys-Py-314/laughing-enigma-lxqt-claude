@@ -1,3 +1,5 @@
 *.log
 .xsession-errors
 enigma v2 good/enigma_v2/
+enigma v2 good/.DS_Store
+/enigma v2 good

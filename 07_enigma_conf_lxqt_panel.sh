@@ -3,21 +3,36 @@
 # enigma_conf_lxqt_panel.sh
 #
 # Sets the LXQt Fancy Menu option "Categories Position" to Left
-# (Fancy Menu Settings > Categories Position) and renames some menu entries,
-# on Debian Trixie / Raspberry Pi 5.
+# (Fancy Menu Settings > Categories Position), renames and reorders some menu
+# entries, on Debian Trixie / Raspberry Pi 5. With the classic Application
+# Menu (mainmenu) on the panel everything but the categories position applies.
 #
 #     chmod +x enigma_conf_lxqt_panel.sh
 #     ./enigma_conf_lxqt_panel.sh                   # categories left + renames
 #     ./enigma_conf_lxqt_panel.sh --right           # categories back on the right
 #     ./enigma_conf_lxqt_panel.sh --no-rename       # only move the categories
 #     ./enigma_conf_lxqt_panel.sh --restore-names   # undo the renames only
+#     ./enigma_conf_lxqt_panel.sh --no-order        # leave the menu order alone
+#     ./enigma_conf_lxqt_panel.sh --default-order   # back to the stock menu order
 #
 # Renamed entries:
 #     Accessories  : FeatherPad              -> Text Editor (Featherpad)
 #     Accessories  : LXQt File Archiver      -> File Archiver (LXQt File Archiver)
 #     Accessories  : PCManFM-Qt File Manager -> File Manager (PCManFM-Qt)
-#     Internet     : vimb                    -> Browser (vimb)
+#     Internet     : vimb                    -> Web Browser (vimb)
 #     System Tools : QTerminal               -> Terminal (QTerminal)
+#
+# Moved entries (done together with the renames):
+#     Terminal (QTerminal) : System Tools -> Accessories. The stock menu keeps
+#         anything in the System category out of Accessories, so the entry
+#         cannot be in both.
+#     Web Browser (vimb)   : also listed under Accessories (stays in Internet).
+#
+# Order of Accessories: Terminal, File Manager, Text Editor, Web Browser,
+#     then everything else alphabetically.
+#
+# Also removes the Pi-Apps launcher icon from the desktop (Pi-Apps itself and
+# its menu entry stay).
 #
 # How it works:
 #     Menu labels come from the Name= line of each app's .desktop file in
@@ -33,6 +48,12 @@
 #     type=fancymenu (false = Left, true or missing = Right). This script
 #     sets that key in each such section and leaves the rest of the file as
 #     it is. A dated backup of panel.conf is kept next to it.
+#
+#     The menu order needs a <Layout> in the menu definition. The system
+#     file under /etc/xdg/menus is not edited: a copy with the layout goes to
+#     ~/.config/menus/, and menu_file=<that copy> is set in every menu
+#     widget section, fancymenu or mainmenu (the panel does not look in ~/.config/menus by
+#     itself). --default-order removes both again.
 #
 #     lxqt-panel writes panel.conf back when it exits, so a running panel is
 #     stopped first, the file is edited, and the panel is started again.
@@ -81,20 +102,28 @@ SIDE="Left"
 DO_POSITION=1
 DO_RENAME=1
 RESTORE_NAMES=0
+ORDER="custom"          # custom | keep | default
+USER_MENU_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/menus"
+MENU_MARKER="enigma_conf_lxqt_panel.sh: Accessories order"
 APPS_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 MARKER="X-Renamed-By=enigma_conf_lxqt_panel.sh"
 
 # desktop file IDs to try | program in Exec= (fallback search) | new label
+#   | categories to add | categories to remove   (both space-separated, optional)
 RENAMES=(
-    "featherpad.desktop org.featherpad.FeatherPad.desktop|featherpad|Text Editor (Featherpad)"
-    "lxqt-archiver.desktop org.lxqt.lxqt-archiver.desktop|lxqt-archiver|File Archiver (LXQt File Archiver)"
-    "pcmanfm-qt.desktop org.lxqt.pcmanfm-qt.desktop|pcmanfm-qt|File Manager (PCManFM-Qt)"
-    "vimb.desktop|vimb|Browser (vimb)"
-    "qterminal.desktop org.lxqt.qterminal.desktop|qterminal|Terminal (QTerminal)"
+    "featherpad.desktop org.featherpad.FeatherPad.desktop|featherpad|Text Editor (Featherpad)||"
+    "lxqt-archiver.desktop org.lxqt.lxqt-archiver.desktop|lxqt-archiver|File Archiver (LXQt File Archiver)||"
+    "pcmanfm-qt.desktop org.lxqt.pcmanfm-qt.desktop|pcmanfm-qt|File Manager (PCManFM-Qt)||"
+    "vimb.desktop|vimb|Web Browser (vimb)|Utility|"
+    "qterminal.desktop org.lxqt.qterminal.desktop|qterminal|Terminal (QTerminal)|Utility|System"
 )
 
+# First entries of the Accessories category, in this order (programs from the
+# table above); everything else follows alphabetically.
+ACCESSORIES_ORDER=(qterminal pcmanfm-qt featherpad vimb)
+
 usage() {
-    sed -n '9,13p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '11,17p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 for arg in "$@"; do
@@ -102,6 +131,8 @@ for arg in "$@"; do
         --right)   VALUE="true"; SIDE="Right" ;;
         --left)    VALUE="false"; SIDE="Left" ;;
         --no-rename)     DO_RENAME=0 ;;
+        --no-order)      ORDER="keep" ;;
+        --default-order) ORDER="default" ;;
         --restore-names) RESTORE_NAMES=1; DO_RENAME=0; DO_POSITION=0 ;;
         -h|--help) usage; exit 0 ;;
         *)         print_error "Unknown option: $arg"; usage; exit 1 ;;
@@ -120,12 +151,24 @@ confirm() {
     esac
 }
 
-# Names of the panel.conf sections whose type is fancymenu.
-fancymenu_sections() {
-    awk '
+# Names of the panel.conf sections of a plugin type: plugin_sections FILE TYPE
+plugin_sections() {
+    awk -v t="$2" '
         /^\[.*\][ \t]*$/ { sec = substr($0, 2, index($0, "]") - 2); next }
-        sec != "" && /^[ \t]*type[ \t]*=[ \t]*fancymenu[ \t]*$/ { print sec }
+        sec != "" && /^[ \t]*type[ \t]*=/ {
+            v = $0; sub(/^[ \t]*type[ \t]*=[ \t]*/, "", v); sub(/[ \t]*$/, "", v)
+            if (v == t) print sec
+        }
     ' "$1"
+}
+
+# SECTIONS: Fancy Menu sections (they take categoriesAtRight).
+# MENU_SECTIONS: every menu widget, Fancy Menu and the classic Application
+# Menu alike (they take menu_file, which carries the Accessories order).
+read_menu_sections() {
+    mapfile -t SECTIONS < <(plugin_sections "$PANEL" fancymenu)
+    mapfile -t MAIN_SECTIONS < <(plugin_sections "$PANEL" mainmenu)
+    MENU_SECTIONS=("${SECTIONS[@]}" "${MAIN_SECTIONS[@]}")
 }
 
 # Prints the system .desktop file for an app: first by file ID, then by
@@ -194,7 +237,7 @@ if [ "$DO_RENAME" = "1" ]; then
     print_status "Renaming menu entries..."
     mkdir -p -- "$APPS_DIR" || { print_error "Could not create ${APPS_DIR}"; exit 1; }
     for spec in "${RENAMES[@]}"; do
-        IFS='|' read -r ids bin label <<<"$spec"
+        IFS='|' read -r ids bin label addcats delcats <<<"$spec"
         if ! src="$(find_source "$ids" "$bin")"; then
             print_warning "${bin} is not installed - skipped \"${label}\"."
             continue
@@ -211,16 +254,40 @@ if [ "$DO_RENAME" = "1" ]; then
             base="${dest}.before-rename"
         fi
         tmp="$(mktemp "${dest}.XXXXXX")" || { print_error "mktemp failed"; exit 1; }
-        # Inside [Desktop Entry]: replace Name=, drop Name[xx]=, add a marker.
+        # New Categories= value, only when this entry changes category:
+        # the current list minus $delcats, plus $addcats where missing.
+        newcats=""
+        if [ -n "${addcats}${delcats}" ]; then
+            newcats="$(awk -v add="$addcats" -v del="$delcats" '
+                /^\[/ { main = ($0 == "[Desktop Entry]"); next }
+                main && /^Categories[ \t]*=/ { sub(/^Categories[ \t]*=[ \t]*/, ""); cats = $0 }
+                END {
+                    nd = split(del, d, " "); for (i = 1; i <= nd; i++) drop[d[i]] = 1
+                    n = split(cats, c, ";"); out = ""
+                    for (i = 1; i <= n; i++)
+                        if (c[i] != "" && !(c[i] in drop) && !(c[i] in have)) { have[c[i]] = 1; out = out c[i] ";" }
+                    na = split(add, a, " ")
+                    for (i = 1; i <= na; i++)
+                        if (!(a[i] in have)) { have[a[i]] = 1; out = out a[i] ";" }
+                    print out
+                }
+            ' "$base")"
+        fi
+        # Inside [Desktop Entry]: replace Name=, drop Name[xx]=, add a marker,
+        # and replace Categories= when a new value was worked out above.
         # [Desktop Action ...] sections keep their own Name= lines.
-        awk -v label="$label" -v marker="$MARKER" '
+        awk -v label="$label" -v marker="$MARKER" -v cats="$newcats" '
             /^\[/ {
                 main = ($0 == "[Desktop Entry]")
                 print
-                if (main) { print "Name=" label; print marker }
+                if (main) {
+                    print "Name=" label; print marker
+                    if (cats != "") print "Categories=" cats
+                }
                 next
             }
             main && /^(Name(\[[^]]*\])?|X-Renamed-By)[ \t]*=/ { next }
+            main && cats != "" && /^Categories[ \t]*=/ { next }
             { print }
         ' "$base" >"$tmp"
         if ! grep -qx "Name=${label}" "$tmp"; then
@@ -230,23 +297,32 @@ if [ "$DO_RENAME" = "1" ]; then
         fi
         chmod 0644 "$tmp"
         mv -f -- "$tmp" "$dest"
-        print_status "${id}: \"${label}\""
+        print_status "${id}: \"${label}\"${newcats:+  [Categories=${newcats}]}"
     done
     refresh_menu_cache
 fi
 
-[ "$DO_POSITION" = "1" ] || exit 0
+# ---------------------------------------------------------------------------
+# Pi-Apps desktop icon
+# ---------------------------------------------------------------------------
+# The Pi-Apps installer drops a launcher on the desktop. Only that launcher is
+# removed; ~/pi-apps and the menu entry are left alone.
+DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null)" || DESKTOP_DIR=""
+[ -n "$DESKTOP_DIR" ] && [ "$DESKTOP_DIR" != "$HOME" ] || DESKTOP_DIR="$HOME/Desktop"
+PIAPPS_ICON="${DESKTOP_DIR}/pi-apps.desktop"
+if [ -f "$PIAPPS_ICON" ] && grep -q '^Exec=.*pi-apps' "$PIAPPS_ICON"; then
+    if rm -f -- "$PIAPPS_ICON"; then
+        print_status "Removed the Pi-Apps desktop icon (${PIAPPS_ICON})."
+    else
+        print_warning "Could not remove ${PIAPPS_ICON}."
+    fi
+fi
 
-print_status "Setting Fancy Menu \"Categories Position\" to ${SIDE}..."
+[ "$DO_POSITION" = "1" ] || exit 0
 
 # ---------------------------------------------------------------------------
 # Find panel.conf
 # ---------------------------------------------------------------------------
-if [ ! -f /usr/share/lxqt/lxqt-panel/fancymenu.desktop ] && \
-   ! ls /usr/lib/*/lxqt-panel/libfancymenu.so >/dev/null 2>&1; then
-    print_warning "The Fancy Menu plugin was not found (it needs lxqt-panel 2.0+)."
-    print_warning "The classic Application Menu (mainmenu) has no category position option."
-fi
 
 if [ ! -f "$PANEL" ]; then
     if [ -f "$SYS_PANEL" ]; then
@@ -262,17 +338,17 @@ if [ ! -f "$PANEL" ]; then
     fi
 fi
 
-mapfile -t SECTIONS < <(fancymenu_sections "$PANEL")
-if [ "${#SECTIONS[@]}" -eq 0 ]; then
-    print_error "No Fancy Menu found in ${PANEL}."
-    if grep -q '^[ \t]*type[ \t]*=[ \t]*mainmenu' "$PANEL"; then
-        print_error "The panel uses the classic Application Menu (mainmenu), which has no"
-        print_error "category position option. Add the \"Fancy Menu\" widget to the panel"
-        print_error "(right-click the panel > Manage Widgets), then run this again."
-    fi
+read_menu_sections
+if [ "${#MENU_SECTIONS[@]}" -eq 0 ]; then
+    print_error "No menu widget (Fancy Menu or Application Menu) found in ${PANEL}."
     exit 1
 fi
-print_status "Fancy Menu section(s): ${SECTIONS[*]}"
+if [ "${#SECTIONS[@]}" -gt 0 ]; then
+    print_status "Fancy Menu section(s): ${SECTIONS[*]} - categories go to the ${SIDE}."
+else
+    print_status "The panel uses the classic Application Menu (${MAIN_SECTIONS[*]}); it has no"
+    print_status "\"Categories Position\" option, so only the menu order is set."
+fi
 
 # ---------------------------------------------------------------------------
 # Stop the panel so it cannot overwrite the edit when it exits
@@ -291,7 +367,7 @@ if pgrep -u "$(id -u)" -x lxqt-panel >/dev/null 2>&1; then
         exit 1
     fi
     # The panel may have written a fresh copy on exit; re-read it.
-    mapfile -t SECTIONS < <(fancymenu_sections "$PANEL")
+    read_menu_sections
 fi
 
 # ---------------------------------------------------------------------------
@@ -300,20 +376,140 @@ fi
 BACKUP="${PANEL}.bak.$(date +%Y%m%d-%H%M%S)"
 cp -p -- "$PANEL" "$BACKUP" && print_status "Backup: ${BACKUP}"
 
+# ---------------------------------------------------------------------------
+# Order of the Accessories category
+# ---------------------------------------------------------------------------
+# MENU_ACTION says what happens to menu_file= in the menu widget sections:
+#   keep  - untouched            set - point it at MENU_DEST
+#   unset - remove it (only when it points into ~/.config/menus)
+MENU_ACTION="keep"
+MENU_DEST=""
+
+# menu_file= of the first menu widget (empty when not set).
+CUR_MENU="$(awk -v s="${MENU_SECTIONS[0]}" '
+    /^\[.*\][ \t]*$/ { sec = substr($0, 2, index($0, "]") - 2); next }
+    sec == s && /^[ \t]*menu_file[ \t]*=/ { sub(/^[ \t]*menu_file[ \t]*=[ \t]*/, ""); print; exit }
+' "$PANEL")"
+
+# The system menu definition the panel would use by itself.
+find_system_menu() {
+    local name dir
+    local IFS_SAVE="$IFS"
+    IFS=':'
+    local dirs=(${XDG_CONFIG_DIRS:-} /etc/xdg /etc /usr/share)
+    IFS="$IFS_SAVE"
+    for name in "$@"; do
+        [ -n "$name" ] || continue
+        for dir in "${dirs[@]}"; do
+            [ -n "$dir" ] || continue
+            [ -f "${dir}/menus/${name}" ] && { printf '%s' "${dir}/menus/${name}"; return 0; }
+        done
+    done
+    return 1
+}
+
+if [ "$ORDER" = "custom" ]; then
+    MENU_SRC=""
+    case "$CUR_MENU" in
+        "${USER_MENU_DIR}"/*) ;;                       # our own copy: look up the system one
+        /*) [ -f "$CUR_MENU" ] && MENU_SRC="$CUR_MENU" ;;
+    esac
+    if [ -z "$MENU_SRC" ]; then
+        # Without menu_file the Fancy Menu reads lxqt-panel-applications.menu
+        # and the classic menu lxqt-applications.menu.
+        if [ "${#SECTIONS[@]}" -gt 0 ]; then
+            MENU_SRC="$(find_system_menu "${CUR_MENU##*/}" lxqt-panel-applications.menu lxqt-applications.menu)" || MENU_SRC=""
+        else
+            MENU_SRC="$(find_system_menu "${CUR_MENU##*/}" lxqt-applications.menu lxqt-panel-applications.menu)" || MENU_SRC=""
+        fi
+    fi
+
+    # .desktop file names of the installed apps, in the wanted order.
+    ORDER_IDS=()
+    for bin in "${ACCESSORIES_ORDER[@]}"; do
+        for spec in "${RENAMES[@]}"; do
+            IFS='|' read -r ids sbin _ <<<"$spec"
+            [ "$sbin" = "$bin" ] || continue
+            if src="$(find_source "$ids" "$bin")"; then
+                ORDER_IDS+=("$(basename -- "$src")")
+            fi
+        done
+    done
+
+    if [ -z "$MENU_SRC" ]; then
+        print_warning "No LXQt menu definition found under /etc/xdg/menus - menu order unchanged."
+    elif [ "${#ORDER_IDS[@]}" -eq 0 ]; then
+        print_warning "None of the apps to order are installed - menu order unchanged."
+    else
+        MENU_DEST="${USER_MENU_DIR}/$(basename -- "$MENU_SRC")"
+        mkdir -p -- "$USER_MENU_DIR"
+        MENU_TMP="$(mktemp "${MENU_DEST}.XXXXXX")" || { print_error "mktemp failed"; exit 1; }
+        # Copy the system file and put a <Layout> just before the closing
+        # </Menu> of the Accessories menu.
+        awk -v ids="$(printf '%s\n' "${ORDER_IDS[@]}")" -v marker="$MENU_MARKER" '
+            inacc && /<Menu>/ { depth++ }
+            inacc && /<\/Menu>/ {
+                if (depth == 0) {
+                    print "\t\t<!-- " marker " -->"
+                    print "\t\t<Layout>"
+                    n = split(ids, a, "\n")
+                    for (i = 1; i <= n; i++) if (a[i] != "") print "\t\t\t<Filename>" a[i] "</Filename>"
+                    print "\t\t\t<Merge type=\"menus\"/>"
+                    print "\t\t\t<Merge type=\"files\"/>"
+                    print "\t\t</Layout>"
+                    inacc = 0
+                } else depth--
+            }
+            { print }
+            /<Name>[ \t]*Accessories[ \t]*<\/Name>/ { inacc = 1; depth = 0 }
+        ' "$MENU_SRC" >"$MENU_TMP"
+        if grep -qF -- "$MENU_MARKER" "$MENU_TMP"; then
+            chmod 0644 "$MENU_TMP"
+            mv -f -- "$MENU_TMP" "$MENU_DEST"
+            MENU_ACTION="set"
+            print_status "Accessories order: ${ORDER_IDS[*]}"
+            print_status "Menu definition: ${MENU_DEST} (from ${MENU_SRC})"
+        else
+            rm -f -- "$MENU_TMP"
+            MENU_DEST=""
+            print_warning "No Accessories menu in ${MENU_SRC} - menu order unchanged."
+        fi
+    fi
+elif [ "$ORDER" = "default" ]; then
+    case "$CUR_MENU" in
+        "${USER_MENU_DIR}"/*)
+            MENU_ACTION="unset"
+            if [ -f "$CUR_MENU" ] && grep -qF -- "$MENU_MARKER" "$CUR_MENU"; then
+                rm -f -- "$CUR_MENU"
+            fi
+            print_status "Menu order back to the stock definition."
+            ;;
+        *)  print_status "Menu order is already the stock one." ;;
+    esac
+fi
+
 TMP="$(mktemp "${PANEL}.XXXXXX")" || { print_error "mktemp failed"; exit 1; }
 trap 'rm -f "$TMP"' EXIT
 
 # In every fancymenu section: drop any existing categoriesAtRight line and
-# write the new one directly under the section header.
-awk -v secs="$(printf '%s\n' "${SECTIONS[@]}")" -v val="$VALUE" '
-    BEGIN { n = split(secs, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1 }
+# write the new one directly under the section header. In every menu widget
+# section (fancymenu and mainmenu): the same for menu_file, when it changes.
+awk -v secs="$(printf '%s\n' "${SECTIONS[@]}")" -v val="$VALUE" \
+    -v msecs="$(printf '%s\n' "${MENU_SECTIONS[@]}")" \
+    -v maction="$MENU_ACTION" -v mfile="$MENU_DEST" '
+    BEGIN {
+        n = split(secs, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1
+        n = split(msecs, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") mwant[a[i]] = 1
+    }
     /^\[.*\][ \t]*$/ {
         sec = substr($0, 2, index($0, "]") - 2)
         print
         if (sec in want) print "categoriesAtRight=" val
+        if ((sec in mwant) && maction == "set") print "menu_file=" mfile
         next
     }
     (sec in want) && /^[ \t]*categoriesAtRight[ \t]*=/ { next }
+    (sec in mwant) && maction != "keep" && /^[ \t]*menu_file[ \t]*=/ { next }
     { print }
 ' "$PANEL" >"$TMP"
 
@@ -326,6 +522,15 @@ for s in "${SECTIONS[@]}"; do
     ' "$TMP")"
     [ "$got" = "$VALUE" ] || BAD=1
 done
+if [ "$MENU_ACTION" = "set" ]; then
+    for s in "${MENU_SECTIONS[@]}"; do
+        got="$(awk -v s="$s" '
+            /^\[.*\][ \t]*$/ { sec = substr($0, 2, index($0, "]") - 2); next }
+            sec == s && /^menu_file=/ { sub(/^menu_file=/, ""); print }
+        ' "$TMP")"
+        [ "$got" = "$MENU_DEST" ] || BAD=1
+    done
+fi
 if [ "$BAD" = "1" ] || [ ! -s "$TMP" ]; then
     print_error "Editing panel.conf failed; the original is unchanged."
     exit 1
@@ -384,7 +589,12 @@ printf ".\n.\n"
 chmod --reference="$PANEL" "$TMP" 2>/dev/null || chmod 0644 "$TMP"
 mv -f -- "$TMP" "$PANEL" || { print_error "Could not write ${PANEL}"; exit 1; }
 trap - EXIT
-print_status "Set categoriesAtRight=${VALUE} in ${PANEL}"
+if [ "${#SECTIONS[@]}" -gt 0 ]; then
+    print_status "Set categoriesAtRight=${VALUE} in ${PANEL}"
+fi
+if [ "$MENU_ACTION" = "set" ]; then
+    print_status "Set menu_file=${MENU_DEST} in ${PANEL}"
+fi
 
 
 
@@ -403,7 +613,7 @@ if [ "$PANEL_WAS_RUNNING" = "1" ]; then
             print_warning "Log out and back in to get the panel back."
         fi
     fi
-    print_status "Done. Open the menu: categories are now on the ${SIDE}."
+    print_status "Done. Open the menu to see the result."
 else
-    print_status "Done. Categories will be on the ${SIDE} the next time LXQt starts."
+    print_status "Done. The menu changes show the next time LXQt starts."
 fi

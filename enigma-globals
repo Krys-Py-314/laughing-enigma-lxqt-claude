@@ -1,0 +1,2365 @@
+#!/bin/bash
+# shellcheck disable=SC2034,SC2154
+{
+	#////////////////////////////////////
+	# DietPi-Globals
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Provides shared/global DietPi variables and functions for current bash session and DietPi scripts
+	# - CRITICAL: Use local index variables in for/while loops, or unset them afterwards, else havoc: https://github.com/MichaIng/DietPi/issues/1454
+	# - Sourced/Loaded in interactive bash sessions via /etc/bashrc.d/dietpi.bash
+	# - Sourced/Loaded at start of most DietPi script
+	#////////////////////////////////////
+
+	#-----------------------------------------------------------------------------------
+	# Core variables, functions and environment, used at start of most DietPi scripts
+	#-----------------------------------------------------------------------------------
+	# Script/Program name
+	# - Set this in originating script, after loading globals and before calling G_INIT()
+	# - Used in G_EXEC, G_WHIP and G_DIETPI-NOTIFY functions
+	unset -v G_PROGRAM_NAME
+
+	# Debug mode
+	# - Set G_DEBUG=1 to enable additional debug output for some DietPi scripts and functions
+	# - This variable is not pre-generated but checked via: [[ $G_DEBUG == 1 ]]
+	#[[ $G_DEBUG == [01] ] || G_DEBUG=0
+
+	# Non-interactive mode
+	# - Set G_INTERACTIVE=0 to skip interactive G_EXEC and G_WHIP dialogues
+	# - Set G_INTERACTIVE=1 to force interactive G_EXEC and G_WHIP dialogues
+	# - Default is based on whether STDIN is attached to a terminal: [[ -t 0 ]]
+	#	cron jobs run non-interactively.
+	#	systemd services run non-interactively unless StardardInput is explicitly set to a terminal.
+	#	/etc/profile, /etc/profile.d/*, ~/.profile, /etc/bash.bashrc, /etc/bashrc.d/* and ~/.bashrc usually run interactively as those are sourced from the originating shell session. "profile" is sourced from login shells only, bashrc from all interactive bash shells.
+	[[ $G_INTERACTIVE == [01] ]] || { [[ -t 0 ]] && G_INTERACTIVE=1 || G_INTERACTIVE=0; }
+
+	# Disable DietPi-Services
+	# - Set G_DIETPI_SERVICES_DISABLE=1 to disable DietPi-Services
+	# - This variable is not pre-generated but checked via: [[ $G_DIETPI_SERVICES_DISABLE == 1 ]]
+	#[[ $G_DIETPI_SERVICES_DISABLE == [01] ]] || G_DIETPI_SERVICES_DISABLE=0
+
+	# DietPi first boot setup stage: -2 = DietPi-Installer/Unknown | -1 = 1st boot | 0 = 1st run dietpi-update | 1 = 1st run dietpi-software | 2 = completed | 10 = Pre-installed image, converts to 2 during 1st boot
+	[[ -f '/boot/dietpi/.install_stage' ]] && read -r G_DIETPI_INSTALL_STAGE < /boot/dietpi/.install_stage || G_DIETPI_INSTALL_STAGE=-2
+
+	# Hardware details
+	[[ -f '/boot/dietpi/.hw_model' ]] && . /boot/dietpi/.hw_model
+
+	# DietPi version and Git branch
+	# shellcheck disable=SC1091
+	[[ -f '/boot/dietpi/.version' ]] && . /boot/dietpi/.version
+	# - Assign defaults/code version as fallback
+	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=10
+	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=9
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=-1
+	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
+	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
+	# - Save current version and Git branch
+	G_VERSIONDB_SAVE(){
+
+		echo "G_DIETPI_VERSION_CORE=$G_DIETPI_VERSION_CORE
+G_DIETPI_VERSION_SUB=$G_DIETPI_VERSION_SUB
+G_DIETPI_VERSION_RC=$G_DIETPI_VERSION_RC
+G_GITBRANCH='$G_GITBRANCH'
+G_GITOWNER='$G_GITOWNER'" > /boot/dietpi/.version
+
+	}
+
+	# Init function for originating script
+	# - Stuff we can't init in main globals/funcs due to /etc/bashrc.d/dietpi.bash load into interactive bash sessions.
+	# - Optional environment variables:
+	#	G_INIT_ALLOW_CONCURRENT=1	= Allow concurrent DietPi script execution (default: 0)
+	#	G_INIT_WAIT_CONCURRENT=<int>	= Max time to wait for concurrent execution to exit before user prompt (default: 5)
+	G_INIT(){
+
+		# Set locale to prevent incorrect scraping due to translated command outputs
+		# Set PATH to expected default to rule out issues due to broken environment, e.g. in combination with "su" or "sudo -E"
+		export LC_ALL='C.UTF-8' LANG='C.UTF-8' PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
+		# Enforce default umask: https://github.com/MichaIng/DietPi/issues/7022
+		umask 0022
+
+		# Set G_PROGRAM_NAME to originating script file (or shell executable) name if it was not set by originating script
+		[[ $G_PROGRAM_NAME ]] || readonly G_PROGRAM_NAME=${0##*/}
+
+		# HIERARCHY system for G_DIETPI-NOTIFY 3 to reduce highlight or sub script output
+		# shellcheck disable=SC2015
+		[[ $HIERARCHY =~ ^[0-9]+$ ]] && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
+
+		# Concurrent execution handling
+		local i=0
+		if [[ $G_INIT_ALLOW_CONCURRENT == 1 ]]
+		then
+			# Concurrency allowed: Use next free suffix for working directory, avoid race condition by checking via "mkdir" success
+			until mkdir "/tmp/${G_PROGRAM_NAME}_$i" &> /dev/null
+			do
+				# If the directory does not exist, its creation failed, probably due to R/O filesystem, hence break loop!
+				[[ -d /tmp/${G_PROGRAM_NAME}_$i ]] || break
+				((i++))
+			done
+
+			readonly G_WORKING_DIR="/tmp/${G_PROGRAM_NAME}_$i"
+		else
+			# Concurrency not allowed: Use existing working directory as flag
+			readonly G_WORKING_DIR="/tmp/$G_PROGRAM_NAME"
+			G_INIT_WAIT_CONCURRENT=${G_INIT_WAIT_CONCURRENT:=5}
+
+			while [[ -d $G_WORKING_DIR ]]
+			do
+				# SIGKILL prevents the exit trap from removing this dir. Remove it in this case and proceed.
+				[[ $(pidof -x "$0") == *' '* ]] || { rm -R "$G_WORKING_DIR"; break; }
+				if (( $i < $G_INIT_WAIT_CONCURRENT ))
+				then
+					((i++))
+					G_DIETPI-NOTIFY 2 "Concurrent execution of $G_PROGRAM_NAME detected, retrying... ($i/$G_INIT_WAIT_CONCURRENT)"
+					G_SLEEP 1
+				else
+					G_WHIP_BUTTON_OK_TEXT='Retry'
+					# shellcheck disable=SC2009
+					G_WHIP_YESNO "WARNING: Concurrent execution of $G_PROGRAM_NAME detected\n
+Please check if one of the following applies:
+ - This script already runs on another terminal/SSH session.
+ - Currently a cron or systemd background job executes the script.
+ - You started this script from within another DietPi program, causing a loop.\n
+Please assure that the concurrent execution has finished, before retrying, otherwise cancel this instance.\n
+The following info might help:
+$(ps f -eo pid,user,tty,cmd | grep -i 'dietpi')" && continue
+
+					G_DIETPI-NOTIFY 1 "Cancelled $G_PROGRAM_NAME due to concurrent execution"
+					exit 1
+				fi
+			done
+		fi
+
+		# Declare exit trap which runs on EXIT signals, including SIGINT and SIGTERM but not SIGKILL!
+		# shellcheck disable=SC2329
+		G_EXIT(){
+
+			# Execute custom exit function if declared
+			declare -F G_EXIT_CUSTOM &> /dev/null && G_EXIT_CUSTOM
+
+			# Navigate to /tmp before removing working directory
+			cd /tmp || G_DIETPI-NOTIFY 1 'Failed to navigate to /tmp'
+
+			# Purge working directory if existent
+			[[ ! -d $G_WORKING_DIR ]] || rm -R "$G_WORKING_DIR" || G_DIETPI-NOTIFY 1 "Failed to remove scripts working directory: $G_WORKING_DIR"
+
+		}
+		trap 'G_EXIT' EXIT
+
+		# Create and navigate to scripts working directory or users home if available: https://github.com/MichaIng/DietPi/issues/905#issuecomment-298223705
+		mkdir -p "$G_WORKING_DIR" && cd "$G_WORKING_DIR" && return 0
+		G_DIETPI-NOTIFY 1 "Failed to create or enter scripts working directory: $G_WORKING_DIR. Aborting ..."
+		exit 1
+
+	}
+
+	# Clear terminal by moving content into scrollback buffer: https://github.com/MichaIng/DietPi/issues/1615
+	G_TERM_CLEAR(){
+
+		# Without an input terminal, there is no point in doing this.
+		[[ -t 0 ]] || return
+
+		# Printing terminal height - 1 newlines seems to be the fastest method that is compatible with all terminal types.
+		local lines=$(tput lines) i newlines
+		for ((i=1;i<$lines;i++)); do newlines+='\n'; done
+		echo -ne "\e[0m$newlines\e[H"
+
+	}
+
+	# Truncate a string in the middle to a maximum length, inserting "..."
+	# - If the string is shorter than or equal to the maximum length, it is returned unchanged.
+	# - If the maximum length is less than 7, the string is truncated to the maximum length without adding "...".
+	# - E.g.
+	# For example:
+	# - `G_TRUNCATE_MID "Long text to be shortened by removing the middle" 26` returns "Long text to... the middle"
+	# - `G_TRUNCATE_MID "G_TRUNCATE_MID "alphabetical" N` returns the below, as N decreases
+	# alp...al
+	# al...al
+	# alphab
+	# alpha
+	# ... and so on
+	G_TRUNCATE_MID()
+	{
+		local s=$1 max=$2
+		local len=${#s}
+		if (( $max >= $len ))
+		then
+			echo "$s"
+			return 0
+
+		elif (( $max < 7 ))
+		then
+			echo "${s:0:$max}"
+			return 0
+		fi
+		local keep=$(( $max - 3 ))
+		local pre=$(( ( $keep + 1 ) / 2 ))
+		local suf=$(( $keep / 2 ))
+		local start=$(( $len - $suf ))
+		echo "${s:0:pre}...${s:start}"
+	}
+
+	# DietPi-Notify
+	# $1:
+	#	-2 = Processing
+	#		$2+ = message
+	#	-1 = Autodetect ok or failed
+	#		$2  = exit code
+	#		$3+ = message
+	#	0  = Ok
+	#		$2+ = message
+	#	1  = Failed
+	#		$2+ = message
+	#	2  = Info
+	#		$2+ = message
+	#	3  = Header
+	#		$2  = program name
+	#		$3+ = message, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
+	G_DIETPI-NOTIFY(){
+
+		local i ainput_string=("$@") output_string grey green red reset yellow dietpi_green
+		# If this is a terminal, it understands ANSI escape sequences, so use colour, always start left-aligned with colour reset and clear screen from cursor to end.
+		# - Assume if STDIN is a terminal that STDOUT is one as well, e.g. masked by pipe to "tee"
+		if [[ -t 0 || -t 1 ]]
+		then
+			output_string='\e[0m\r\e[J' grey='\e[90m' green='\e[32m' red='\e[31m' reset='\e[0m' yellow='\e[33m' dietpi_green='\e[38;5;154m'
+			# Kill existing process animation if this is not a processing message
+			if [[ $1 != '-2' && -w '/tmp/dietpi-process.pid' ]]
+			then
+				kill -9 "$(</tmp/dietpi-process.pid)" &> /dev/null
+				rm -f /tmp/dietpi-process.pid &> /dev/null
+			fi
+
+		# Else remove all colour codes from input string
+		else
+			shopt -s extglob
+			for i in "${!ainput_string[@]}"
+			do
+				ainput_string[$i]=${ainput_string[$i]//\\e[[0-9]*([;0-9])m}
+			done
+			shopt -u extglob
+		fi
+		local bracket_l="${grey}[$reset" bracket_r="$grey]$reset"
+		local ok="$bracket_l$green  OK  $bracket_r " failed="$bracket_l${red}FAILED$bracket_r "
+
+		# Print input array from index $1
+		Print(){
+
+			[[ $1 == 1 && $G_PROGRAM_NAME ]] && output_string+="$grey$G_PROGRAM_NAME |$reset "
+			for ((i=$1; i<${#ainput_string[@]}; i++))
+			do
+				output_string+=${ainput_string[$i]}
+			done
+			echo -ne "$output_string$reset"
+
+		}
+
+		#--------------------------------------------------------------------------------------
+		# Main Loop
+		#--------------------------------------------------------------------------------------
+		# Autodetect ok or failed
+		# $2 = exit code
+		# $3+ = message
+		# - Use this at end of DietPi scripts, e.g. G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0}
+		if (( $1 == -1 )); then
+
+			if (( $2 )); then
+
+				output_string+=$failed
+				ainput_string+=(' | Exited with error\n')
+
+			else
+
+				output_string+=$ok
+				ainput_string+=(' | Completed\n')
+
+			fi
+			Print 2
+
+		#--------------------------------------------------------------------------------------
+		# Processing
+		# $3+ = message
+		# NB: Do not use this with newlines, literally or "\n", as this would cause parts of the processing message not being overwritten as intended.
+		elif (( $1 == -2 )); then
+
+			# If this is a terminal and not "dumb", it understands the carriage return control code, so make any next output overwrite the processing message.
+			if [[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]]
+			then
+				# Calculate the amount of output lines and in case move cursor up for correct animation position and to allow overwriting the whole output.
+				local input_string="${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$*"
+				# - Remove colour codes: Use extended globbing
+				shopt -s extglob
+				input_string=${input_string//\\e[[0-9]*([;0-9])m}
+				shopt -u extglob
+				local screen_width=$(tput cols)
+				local output_lines=$(( ( ${#input_string} + 5 ) / $screen_width )) # +5 = [ .... ] - $1
+				(( $output_lines )) && ainput_string+=("\e[${output_lines}A")
+				# If we do not print the animation, move the cursor left as well to allow overwriting the whole first line.
+				[[ -t 0 ]] || ainput_string+=('\r')
+
+			# Else, we add a newline to leave processing message complete.
+			else
+				ainput_string+=('\n')
+			fi
+
+			# Print animation only if this is the terminal control process as otherwise foreign output might cause a mess and we might be not able to kill the animation.
+			if [[ -t 0 && $TERM != 'dumb' ]]
+			then
+				output_string+="$bracket_l      $bracket_r "
+				Print 1
+
+				# If redirect to existent PID file fails due to noclobber, don't start processing animation.
+				# - This method prevents a tiny race condition from checking file existence until creating it, when doing: [[ ! -e file ]] && > file
+				set -C
+				if { > /tmp/dietpi-process.pid; } &> /dev/null
+				then
+					set +C
+					Start_Process_Animation()
+					{
+						local bright_dot='\e[1;33m.' dimmed_dot='\e[0;33m.'
+						# Alternative: \u23F9
+						local aprocess_string=(
+							"$bright_dot     "
+							"$dimmed_dot$bright_dot    "
+							" $dimmed_dot$bright_dot   "
+							"  $dimmed_dot$bright_dot  "
+							"   $dimmed_dot$bright_dot "
+							"    $dimmed_dot$bright_dot"
+							"     $bright_dot"
+							"    $bright_dot$dimmed_dot"
+							"   $bright_dot$dimmed_dot "
+							"  $bright_dot$dimmed_dot  "
+							" $bright_dot$dimmed_dot   "
+							"$bright_dot$dimmed_dot    "
+						)
+
+						for (( i=0; i<=${#aprocess_string[@]}; i++ ))
+						do
+							(( i == ${#aprocess_string[@]} )) && i=0
+							[[ -w '/tmp/dietpi-process.pid' ]] && echo -ne "\e[2G${aprocess_string[$i]}$reset\e[C" || return 0
+							G_SLEEP 0.15
+						done
+					}
+					{ Start_Process_Animation & echo $! > /tmp/dietpi-process.pid; disown; } 2> /dev/null
+					unset -f Start_Process_Animation
+				else
+					set +C
+				fi
+			else
+				output_string+="$bracket_l $yellow.... $bracket_r "
+				Print 1
+			fi
+
+		#--------------------------------------------------------------------------------------
+		# Ok
+		# $2+ = message
+		elif (( $1 == 0 )); then
+
+			output_string+=$ok
+			ainput_string+=('\n')
+			Print 1
+
+		#--------------------------------------------------------------------------------------
+		# Failed
+		# $2+ = message
+		elif (( $1 == 1 )); then
+
+			output_string+=$failed
+			ainput_string+=('\n')
+			# Print error messages to STDERR
+			Print 1 >&2
+
+		#--------------------------------------------------------------------------------------
+		# Info
+		# $2+ = message
+		elif (( $1 == 2 )); then
+
+			output_string+="$bracket_l INFO $bracket_r "
+			# Keep info messages in grey, even if "$G_PROGRAM_NAME | \e[0m" is added:
+			ainput_string[1]="$grey${ainput_string[1]}"
+			ainput_string+=('\n')
+			Print 1
+
+		#--------------------------------------------------------------------------------------
+		# Header
+		# $2 = program name
+		# $3+ = message, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
+		elif (( $1 == 3 )); then
+
+			if disable_error=1 G_CHECK_VALIDINT "$HIERARCHY" 1; then
+
+				local status_subfunction="$HIERARCHY "
+				# > 9 should never occur, however, if it is, lets make it line up regardless
+				(( $HIERARCHY > 9 )) && status_subfunction=$HIERARCHY
+
+				output_string+="$bracket_l$yellow SUB$status_subfunction$bracket_r $2 > "
+				ainput_string+=('\n')
+
+			else
+
+				output_string+="
+ $dietpi_green$2$reset
+$grey─────────────────────────────────────────────────────
+ ${G_NOTIFY_3_MODE:-Mode}:$reset "
+				ainput_string+=('\n\n')
+
+			fi
+			Print 2
+
+		fi
+		#-----------------------------------------------------------------------------------
+		# Unset internal functions, otherwise they are accessible from terminal
+		unset -f Print
+		#-----------------------------------------------------------------------------------
+
+	}
+
+	# $@ = Pass positional arguments for automatic sudo/G_SUDO attempt
+	G_CHECK_ROOT_USER()
+	{
+		(( $EUID )) || return 0
+
+		# Invoking shell is not a script
+		if [[ $0 == '-bash' || $0 == 'bash' || $0 == *'/bash' ]]
+		then
+			# Invoking function is a G_* function, try to run with G_SUDO
+			if [[ ${FUNCNAME[1]} == 'G_'* ]]
+			then
+				G_DIETPI-NOTIFY 2 "Root privileges required. Retrying with sudo wrapper: G_SUDO ${FUNCNAME[1]} $*"
+				# Return error as well on success, so parent functions know they do not need to run anymore, but to not interrupt invoking shell
+				G_SUDO "${FUNCNAME[1]}" "$@" && return 1
+				G_DIETPI-NOTIFY 1 "\"G_SUDO ${FUNCNAME[1]} $*\" failed. Please try to run the command from a root shell. Aborting ..."
+			else
+				G_DIETPI-NOTIFY 1 'Root privileges required. Please try to run the command from a root shell. Aborting ...'
+			fi
+			# If retry with G_SUDO wrapper did not succeed, interrupt invoking shell if it is not interactive, else the current command group.
+			# - In interactive shells, "kill -INT $$" is treated like a hitting CTRL+C, hence it won't kill the shell, but will abort the command group. E.g. "command1; kill -INT $$; command2" from an interactive shell skips command2, reverting to command prompt.
+			kill -INT $$
+		else
+			G_DIETPI-NOTIFY 2 "Root privileges required. Retrying with sudo: sudo $0 $*"
+			local interactive=()
+			(( $G_INTERACTIVE )) || interactive=('-n')
+			exec sudo "${interactive[@]}" "$0" "$@"
+		fi
+		return 1
+	}
+
+	G_CHECK_ROOTFS_RW()
+	{
+		[[ $G_CHECK_ROOTFS_RW_VERIFIED == 1 ]] && return 0
+
+		if grep -q '[[:blank:]]/[[:blank:]].*[[:blank:]]ro,' /proc/mounts
+		then
+			G_DIETPI-NOTIFY 1 'RootFS is currently Read Only (R/O) mounted. Aborting ...'
+			G_DIETPI-NOTIFY 2 'DietPi requires RootFS to be Read/Write (R/W) mounted. Please run "dietpi-drive_manager" to re-enable.'
+			[[ $0 == 'bash' || $0 == *'/bash' ]] && kill -INT $$ || exit 1
+			return 1
+		fi
+
+		export G_CHECK_ROOTFS_RW_VERIFIED=1
+		return 0
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Shortcut functions
+	#-----------------------------------------------------------------------------------
+	# sudo wrapper that ensures DietPi-Globals with G_* commands are loaded
+	G_SUDO()
+	{
+		if (( $EUID ))
+		then
+			local interactive=()
+			(( $G_INTERACTIVE )) || interactive=('-n')
+			sudo "${interactive[@]}" bash -c '. /boot/dietpi/func/dietpi-globals && "$@"' G_SUDO "$@"
+		else
+			"$@"
+		fi
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Whiptail (Whippy-da-whip-whip-whip tail!)
+	# - Automatically detects/processes for G_INTERACTIVE
+	#-----------------------------------------------------------------------------------
+	# Input:
+	# - G_WHIP_DEFAULT_ITEM		| Optional, to set the default selected/menu item or inputbox entry
+	# - G_WHIP_SIZE_X_MAX=50	| Optional, limits width [in chars], if below available screen width
+	# - G_WHIP_BUTTON_OK_TEXT	| Optional, change as needed, defaults to "Ok"
+	# - G_WHIP_BUTTON_CANCEL_TEXT	| Optional, change as needed, defaults to "Cancel"
+	# - G_WHIP_NOCANCEL=1		| Optional, hide the cancel button on inputbox, menu and checkbox dialogues
+	# - G_WHIP_MENU_ARRAY		| Required for G_WHIP_MENU to set available menu entries, 2 array indices per line: ('item' 'description')
+	# - G_WHIP_CHECKLIST_ARRAY	| Required for G_WHIP_CHECKLIST set available checklist options, 3 array indices per line: ('item' 'description' 'on'/'off')
+	# - G_WHIP_CHECKLIST_ENUM=1	| Optional, if set, the checklist will be displayed enumerated with numeric tags rather than the provided tags
+	# Output:
+	# - G_WHIP_RETURNED_VALUE 	| Returned value from inputbox/menu/checklist based whiptail items
+
+	# G_WHIP_DESTROY | Clear vars after run of whiptail
+	G_WHIP_DESTROY(){ unset -v G_WHIP_DEFAULT_ITEM G_WHIP_SIZE_X_MAX G_WHIP_BUTTON_OK_TEXT G_WHIP_BUTTON_CANCEL_TEXT G_WHIP_NOCANCEL G_WHIP_MENU_ARRAY G_WHIP_CHECKLIST_ARRAY G_WHIP_INPUTBOX_REGEX G_WHIP_INPUTBOX_REGEX_TEXT G_WHIP_CHECKLIST_ENUM; }
+
+	# Run once, to be failsafe in case any exported/environment variables are left from originating shell
+	G_WHIP_DESTROY
+
+	# G_WHIP_INIT
+	# - Update target whiptail size, based on current screen dimensions
+	# - $1 = input mode | 2: Z=G_WHIP_MENU_ARRAY 3: Z=G_WHIP_CHECKLIST_ARRAY
+	G_WHIP_INIT()
+	{
+		# Automagically set size of whiptail box and contents according to screen size and whiptail type
+		local input_mode=$1
+
+		# Update backtitle
+		WHIP_BACKTITLE=$G_HW_MODEL_NAME
+		local active_ip=$(G_GET_NET -q ip)
+		[[ $active_ip ]] && WHIP_BACKTITLE+=" | IP: $active_ip"
+
+		# Set default button text, if not defined
+		G_WHIP_BUTTON_OK_TEXT=${G_WHIP_BUTTON_OK_TEXT:-Ok}
+		G_WHIP_BUTTON_CANCEL_TEXT=${G_WHIP_BUTTON_CANCEL_TEXT:-Cancel}
+
+		# Get current screen dimensions
+		WHIP_SIZE_X=$(tput cols)
+		WHIP_SIZE_Y=$(tput lines)
+		# - Limit and reset non-valid integer values to 120 characters per line
+		(( $WHIP_SIZE_X <= 120 )) || WHIP_SIZE_X=120
+		# - If width is below 9 characters, the text field starts to cover the internal margin, regardless of content or button text, hence 9 is the absolute minimum.
+		(( $WHIP_SIZE_X >= 9 )) || WHIP_SIZE_X=9
+		# - G_WHIP_SIZE_X_MAX allows to further reduce width, e.g. to keep X/Y ratio in beautiful range.
+		disable_error=1 G_CHECK_VALIDINT "$G_WHIP_SIZE_X_MAX" 0 "$WHIP_SIZE_X" && WHIP_SIZE_X=$G_WHIP_SIZE_X_MAX
+		# - If height is below 7 lines, not a single line of text can be shown, hence 7 is the reasonable minimum.
+		(( $WHIP_SIZE_Y >= 7 )) || WHIP_SIZE_Y=7
+
+		# Calculate lines required to show all text content
+		local whip_lines_text=6 # Due to internal margins, the available height is 6 lines smaller
+		local whip_chars_text=$(( $WHIP_SIZE_X - 4 )) # Due to internal margins, the available width is 4 characters smaller
+		WHIP_SCROLLTEXT= # Add "--scrolltext" automatically if text height exceeds max available
+
+		Process_Line()
+		{
+			local split line=$1
+
+			# Split line by "\n" newline escape sequences, the only one which is interpreted by whiptail, in a strict way: "\\n" still creates a newline, hence the sequence cannot be escaped!
+			while [[ $line == *'\n'* ]]
+			do
+				# Grab first line
+				split=${line%%\\n*}
+				# Add required line + additional lines due to automated line breaks, if text exceeds internal box
+				(( whip_lines_text += 1 + ( ${#split} - 1 ) / $whip_chars_text ))
+				# Stop counting if required size exceeds screen already
+				(( $whip_lines_text > $WHIP_SIZE_Y )) && return 1
+				# Cut away handled line from string
+				line=${line#*\\n}
+			done
+
+			# Process remaining line
+			(( whip_lines_text += 1 + ( ${#line} - 1 ) / $whip_chars_text ))
+			# Stop counting if required size exceeds screen already
+			(( $whip_lines_text <= $WHIP_SIZE_Y )) || return 1
+		}
+
+		# - WHIP_MESSAGE
+		if [[ $WHIP_ERROR$WHIP_MESSAGE ]]
+		then
+			while read -r line; do Process_Line "$line" || break; done <<< "$WHIP_ERROR$WHIP_MESSAGE"
+
+		# - WHIP_TEXTFILE
+		elif [[ $WHIP_TEXTFILE ]]
+		then
+			while read -r line; do Process_Line "$line" || break; done < "$WHIP_TEXTFILE"
+		fi
+
+		unset -f Process_Line
+
+		# Process menu and checklist
+		# - G_WHIP_MENU
+		if [[ $input_mode == 2 ]]
+		then
+			# Requires 1 additional line for text
+			((whip_lines_text++))
+
+			# Lines required for menu: ( ${#array} + 1 ) to round up on uneven array entries
+			WHIP_SIZE_Z=$(( ( ${#G_WHIP_MENU_ARRAY[@]} + 1 ) / 2 ))
+
+			# Auto length for ─
+			# - Get max length of all lines in array indices 1 + 2n | '' 'this one'
+			local i character_count_max=0
+			for (( i=1; i<${#G_WHIP_MENU_ARRAY[@]}; i+=2 ))
+			do
+				(( ${#G_WHIP_MENU_ARRAY[$i]} > $character_count_max )) && character_count_max=${#G_WHIP_MENU_ARRAY[$i]}
+			done
+			((character_count_max--)) # -1 for additional ●
+
+			# - Now add the additional required lines
+			for (( i=1; i<${#G_WHIP_MENU_ARRAY[@]}; i+=2 ))
+			do
+				[[ ${G_WHIP_MENU_ARRAY[$i]} == '●'* ]] || continue
+
+				while (( ${#G_WHIP_MENU_ARRAY[$i]} < $character_count_max ))
+				do
+					G_WHIP_MENU_ARRAY[$i]+='-'
+				done
+
+				G_WHIP_MENU_ARRAY[$i]+='●'
+			done
+
+		# - G_WHIP_CHECKLIST
+		elif [[ $input_mode == 3 ]]
+		then
+			# Lines required for checklist: ( ${#array} + 2 ) to round up single+double array entries
+			WHIP_SIZE_Z=$(( ( ${#G_WHIP_CHECKLIST_ARRAY[@]} + 2 ) / 3 ))
+
+			# Auto length for ─
+			# - Get max length of all lines in array indices 1 + 3n 1st | '' 'this one' ''
+			local i character_count_max=0
+			for (( i=1; i<${#G_WHIP_CHECKLIST_ARRAY[@]}; i+=3 ))
+			do
+				(( ${#G_WHIP_CHECKLIST_ARRAY[$i]} > $character_count_max )) && character_count_max=${#G_WHIP_CHECKLIST_ARRAY[$i]}
+			done
+			((character_count_max--)) # -1 for additional ●
+
+			# - Now add the additional required lines
+			for (( i=1; i<${#G_WHIP_CHECKLIST_ARRAY[@]}; i+=3 ))
+			do
+				[[ ${G_WHIP_CHECKLIST_ARRAY[$i]} == '●'* ]] || continue
+
+				while (( ${#G_WHIP_CHECKLIST_ARRAY[$i]} < $character_count_max ))
+				do
+					G_WHIP_CHECKLIST_ARRAY[$i]+='-'
+				done
+
+				G_WHIP_CHECKLIST_ARRAY[$i]+='●'
+			done
+		fi
+
+		# Adjust sizes to fit content
+		# - G_WHIP_MENU/G_WHIP_CHECKLIST needs to hold text + selection field (WHIP_SIZE_Z)
+		if [[ $input_mode == [23] ]]
+		then
+			# If required lines would exceed screen, reduce WHIP_SIZE_Z
+			if (( $whip_lines_text + $WHIP_SIZE_Z > $WHIP_SIZE_Y ))
+			then
+				WHIP_SIZE_Z=$(( $WHIP_SIZE_Y - $whip_lines_text ))
+				# Assure at least 2 lines to have the selection field scroll bar identifiable
+				if (( $WHIP_SIZE_Z < 2 ))
+				then
+					WHIP_SIZE_Z=2
+					# Since text is partly hidden now, add text scroll ability and info to backtitle
+					WHIP_SCROLLTEXT='--scrolltext'
+					WHIP_BACKTITLE+=' | Use up/down buttons to scroll text'
+				fi
+
+			# else reduce WHIP_SIZE_Y to hold all content
+			else
+				WHIP_SIZE_Y=$(( $whip_lines_text + $WHIP_SIZE_Z ))
+			fi
+
+		# - Everything else needs to hold text only
+		elif (( $whip_lines_text > $WHIP_SIZE_Y ))
+		then
+			WHIP_SCROLLTEXT='--scrolltext'
+			WHIP_BACKTITLE+=' | Use up/down buttons to scroll text'
+		else
+			WHIP_SIZE_Y=$whip_lines_text
+		fi
+	}
+
+	# G_WHIP_MSG "message"
+	# - Display a message from input string
+	G_WHIP_MSG()
+	{
+		local WHIP_MESSAGE=$*
+
+		if [[ $G_INTERACTIVE == 1 ]]
+		then
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y
+			G_WHIP_INIT
+			# shellcheck disable=SC2086
+			whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --msgbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X"
+		else
+			G_DIETPI-NOTIFY 2 "$WHIP_MESSAGE"
+		fi
+
+		G_WHIP_DESTROY
+	}
+
+	# G_WHIP_VIEWFILE "/path/to/file"
+	# - Display content from input file
+	# - Exit code: 1=file not found, else=file shown or noninteractive
+	G_WHIP_VIEWFILE()
+	{
+		local result=0
+
+		if [[ $G_INTERACTIVE == 1 ]]
+		then
+			local WHIP_ERROR WHIP_MESSAGE WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_TEXTFILE=$1 header='File viewer'
+			[[ $log == 1 ]] && header='Log viewer'
+			if [[ -f $WHIP_TEXTFILE ]]
+			then
+				G_WHIP_INIT
+				# shellcheck disable=SC2086
+				whiptail --title "${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$header" --backtitle "$WHIP_BACKTITLE" --textbox "$WHIP_TEXTFILE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X"
+			else
+				result=1
+				WHIP_ERROR="[FAILED] File does not exist: $WHIP_TEXTFILE"
+				G_WHIP_INIT
+				# shellcheck disable=SC2086
+				whiptail --title "${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$header" --backtitle "$WHIP_BACKTITLE" --msgbox "$WHIP_ERROR" --ok-button "$G_WHIP_BUTTON_OK_TEXT" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X"
+			fi
+		fi
+
+		G_WHIP_DESTROY
+		return "$result"
+	}
+
+	# G_WHIP_YESNO "message"
+	# - Prompt user for Yes/No | Ok/Cancel choice and return result
+	# - Exit code: 0=Yes/Ok, else=No/Cancel or noninteractive
+	G_WHIP_YESNO()
+	{
+		local result=1 default_no=('--defaultno')
+		[[ ${G_WHIP_DEFAULT_ITEM,,} =~ ^('yes'|'ok'|1|'y')$ ]] && result=0 default_no=()
+
+		if [[ $G_INTERACTIVE == 1 ]]
+		then
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$*
+			G_WHIP_INIT
+			# shellcheck disable=SC2086
+			whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --yesno "$WHIP_MESSAGE" --yes-button "$G_WHIP_BUTTON_OK_TEXT" --no-button "$G_WHIP_BUTTON_CANCEL_TEXT" "${default_no[@]}" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X"
+			result=$?
+		fi
+
+		G_WHIP_DESTROY
+		return "$result"
+	}
+
+	# G_WHIP_INPUTBOX "message"
+	# - Prompt user to input text and save it to G_WHIP_RETURNED_VALUE
+	# - G_WHIP_INPUTBOX_REGEX/G_WHIP_INPUTBOX_REGEX_TEXT: Regular expression and description about allowed input. Defaults to the requirement that the input is not empty.
+	# - Exit code: 0=input matches G_WHIP_INPUTBOX_REGEX, else=non-interactive, user cancelled, or whiptail error
+	G_WHIP_INPUTBOX()
+	{
+		local result=1
+		unset -v G_WHIP_RETURNED_VALUE # in case left from last G_WHIP
+
+		if [[ $G_INTERACTIVE == 1 ]]
+		then
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$* NOCANCEL=()
+			G_WHIP_INPUTBOX_REGEX=${G_WHIP_INPUTBOX_REGEX:-'.'}
+			G_WHIP_INPUTBOX_REGEX_TEXT=${G_WHIP_INPUTBOX_REGEX_TEXT:-'not be empty'}
+			[[ $G_WHIP_NOCANCEL == 1 ]] && NOCANCEL=('--nocancel')
+			while :
+			do
+				G_WHIP_INIT
+				# shellcheck disable=SC2086
+				G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --inputbox "$WHIP_ERROR$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" "${NOCANCEL[@]}" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X" "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3-)
+				result=$?
+				[[ $result == 0 && ! $G_WHIP_RETURNED_VALUE =~ $G_WHIP_INPUTBOX_REGEX ]] && { WHIP_ERROR="[FAILED] Input must $G_WHIP_INPUTBOX_REGEX_TEXT, please try again ...\n\n"; continue; }
+				[[ $result != 0 && $G_WHIP_NOCANCEL == 1 && $G_WHIP_DEFAULT_ITEM && ! $G_WHIP_RETURNED_VALUE ]] && G_WHIP_RETURNED_VALUE=$G_WHIP_DEFAULT_ITEM # if interactive cancel with ESC key while button is hidden and default set, apply default
+				break
+			done
+		else
+			G_WHIP_RETURNED_VALUE=$G_WHIP_DEFAULT_ITEM
+		fi
+
+		G_WHIP_DESTROY
+		return "$result"
+	}
+
+	# G_WHIP_PASSWORD "message"
+	# - Prompt user to input password and save it in variable "result"
+	# - Originating script must "unset -v result" after value has been handled for security reasons!
+	# - Exit code: 0=input matches G_WHIP_INPUTBOX_REGEX and has been confirmed, else=non-interactive, user cancelled, or whiptail error
+	G_WHIP_PASSWORD()
+	{
+		local return_value=1
+		unset -v result # in case left from last call
+
+		if [[ $G_INTERACTIVE == 1 ]]
+		then
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$* NOCANCEL=() password_0 password_1
+			G_WHIP_INPUTBOX_REGEX=${G_WHIP_INPUTBOX_REGEX:-'.'}
+			G_WHIP_INPUTBOX_REGEX_TEXT=${G_WHIP_INPUTBOX_REGEX_TEXT:-'not be empty'}
+			[[ $G_WHIP_NOCANCEL == 1 ]] && NOCANCEL=('--nocancel')
+			while :
+			do
+				G_WHIP_INIT
+				# shellcheck disable=SC2086
+				password_0=$(whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --passwordbox "$WHIP_ERROR$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" "${NOCANCEL[@]}" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X" 3>&1 1>&2 2>&3-)
+				return_value=$?
+				(( $return_value )) && break # Exit loop on error or cancel/ESC
+				# Check regex via grep perl method to allow negative lookahead pattern for password exclusion
+				grep -Pq "$G_WHIP_INPUTBOX_REGEX" <<< "$password_0" || { WHIP_ERROR="[FAILED] Input must $G_WHIP_INPUTBOX_REGEX_TEXT, please try again ...\n\n"; continue; }
+
+				password_1=$(whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --passwordbox 'Please retype and confirm your input:' --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" "${NOCANCEL[@]}" 7 "$WHIP_SIZE_X" 3>&1 1>&2 2>&3-)
+				return_value=$?
+				(( $return_value )) && break # Exit loop on error or cancel/ESC
+				[[ $password_0 == "$password_1" ]] || { WHIP_ERROR='[FAILED] Inputs do not match, please try again...\n\n'; continue; }
+				result=$password_0
+				break
+			done
+		fi
+
+		G_WHIP_DESTROY
+		return "$return_value"
+	}
+
+	# G_WHIP_MENU "message"
+	# - Prompt user to select option from G_WHIP_MENU_ARRAY and save choice to G_WHIP_RETURNED_VALUE
+	# - Exit code: 0=selection done, else=user cancelled or noninteractive
+	G_WHIP_MENU()
+	{
+		local result=1
+		unset -v G_WHIP_RETURNED_VALUE # in case left from last call
+
+		if [[ $G_INTERACTIVE == 1 ]]
+		then
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$* NOCANCEL=()
+			[[ $G_WHIP_NOCANCEL == 1 ]] && NOCANCEL=('--nocancel')
+			G_WHIP_BUTTON_OK_TEXT=${G_WHIP_BUTTON_OK_TEXT:-Select}
+			until [[ $G_WHIP_RETURNED_VALUE ]] # Stay in menu if empty option was selected (separator line)
+			do
+				G_WHIP_INIT 2
+				# shellcheck disable=SC2086
+				G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --menu "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" "${NOCANCEL[@]}" --default-item "$G_WHIP_DEFAULT_ITEM" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X" "$WHIP_SIZE_Z" -- "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3-)
+				result=$?
+				[[ $result != 0 && $G_WHIP_NOCANCEL == 1 && $G_WHIP_DEFAULT_ITEM && ! $G_WHIP_RETURNED_VALUE ]] && G_WHIP_RETURNED_VALUE=$G_WHIP_DEFAULT_ITEM # if interactive cancel with ESC key while button is hidden and default set, apply default
+				(( $result )) && break # Exit loop on error or cancel/ESC
+			done
+		else
+			G_WHIP_RETURNED_VALUE=$G_WHIP_DEFAULT_ITEM
+		fi
+
+		G_WHIP_DESTROY
+		return "$result"
+	}
+
+	# G_WHIP_CHECKLIST "message"
+	# - Prompt user to select multiple options from G_WHIP_CHECKLIST_ARRAY and save choice to G_WHIP_RETURNED_VALUE
+	# - Exit code: 0=selection done, else=user cancelled or noninteractive
+	# - G_WHIP_CHECKLIST_ENUM=1: Optional, if set, the checklist will be displayed enumerated with numeric tags rather than the provided tags
+	G_WHIP_CHECKLIST()
+	{
+		local result=1
+		unset -v G_WHIP_RETURNED_VALUE # in case left from last call
+
+		if [[ $G_INTERACTIVE == 1 ]]
+		then
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$* NOCANCEL=()
+			[[ $G_WHIP_NOCANCEL == 1 ]] && NOCANCEL=('--nocancel')
+			G_WHIP_BUTTON_OK_TEXT=${G_WHIP_BUTTON_OK_TEXT:-Confirm}
+
+			# If G_WHIP_CHECKLIST_ENUM=1 is set, map and replace original tags and default with numeric ones
+			if (( $G_WHIP_CHECKLIST_ENUM ))
+			then
+				local map=() idx=0
+				for ((i=0;i<${#G_WHIP_CHECKLIST_ARRAY[@]};i+=3))
+				do
+					[[ $G_WHIP_DEFAULT_ITEM == "${G_WHIP_CHECKLIST_ARRAY[$i]}" ]] && G_WHIP_DEFAULT_ITEM=$idx
+					map[$idx]=${G_WHIP_CHECKLIST_ARRAY[$i]}
+					G_WHIP_CHECKLIST_ARRAY[$i]=$idx
+					((idx++))
+				done
+			fi
+
+			G_WHIP_INIT 3
+			# shellcheck disable=SC2086
+			G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE | Use spacebar to toggle selection" --checklist "$WHIP_MESSAGE" --separate-output --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" "${NOCANCEL[@]}" --default-item "$G_WHIP_DEFAULT_ITEM" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X" "$WHIP_SIZE_Z" -- "${G_WHIP_CHECKLIST_ARRAY[@]}" 3>&1 1>&2 2>&3-)
+			result=$?
+
+			# If G_WHIP_CHECKLIST_ENUM=1 is set, replace numeric selections back to original tags
+			if (( $G_WHIP_CHECKLIST_ENUM ))
+			then
+				local mapped=()
+				for idx in $G_WHIP_RETURNED_VALUE
+				do
+					mapped+=("${map[$idx]}")
+				done
+				G_WHIP_RETURNED_VALUE=${mapped[*]}
+			fi
+
+			G_WHIP_RETURNED_VALUE=$(echo -e "$G_WHIP_RETURNED_VALUE" | tr '\n' ' ')
+		else
+			G_WHIP_RETURNED_VALUE=$G_WHIP_DEFAULT_ITEM
+		fi
+
+		G_WHIP_DESTROY
+		return "$result"
+	}
+
+	# G_BUG_REPORT [-c COMMAND] [-? EXIT_CODE]
+	# - Print pre-filled bug report template
+	G_BUG_REPORT()
+	{
+		local command exit_code
+		while (( $# ))
+		do
+			case $1 in
+				'-c') shift; command=$1;;
+				'-?') shift; exit_code=$1;;
+				*) G_DIETPI-NOTIFY 1 "Invalid argument \"$1\""; return 1;;
+			esac
+			shift
+		done
+
+		# Print bug report template
+		echo "#### Details:
+- Date           | $(date '+%F %T')"
+		# - Add program/script name, failed command and exit code if given
+		[[ $G_PROGRAM_NAME ]] && echo "- Program name   | $G_PROGRAM_NAME"
+		[[ $command ]] && echo "- Command        | \`$command\`"
+		[[ $exit_code ]] && echo "- Exit code      | $exit_code"
+		echo "- DietPi version | v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC ($G_GITOWNER/$G_GITBRANCH)
+- Distro version | $G_DISTRO_NAME (ID=$G_DISTRO${G_RASPBIAN:+,RASPBIAN=$G_RASPBIAN})
+- Kernel version | \`$(uname -a)\`
+- Architecture	 | \`$(dpkg --print-architecture)\`
+- Hardware model | $G_HW_MODEL_NAME (ID=$G_HW_MODEL)
+- Power supply   | (EG: RAVPower 5V 1A)
+- SD card        | (EG: SanDisk Ultra 16 GB)"
+		# - Add image creator and pre-image info if given
+		if [[ -f '/boot/dietpi/.prep_info' ]]
+		then
+			image_creator=$(mawk 'NR==1' /boot/dietpi/.prep_info)
+			[[ ${image_creator:-0} == 0 ]] || echo "- Image creator  | $image_creator"
+			preimage_name=$(mawk 'NR==2' /boot/dietpi/.prep_info)
+			[[ $preimage_name ]] && echo "- Pre-image      | $preimage_name"
+		fi
+		echo '#### Steps to reproduce:
+<!-- Explain how to reproduce the issue -->
+1. ...
+2. ...
+#### Expected behaviour:
+<!-- What SHOULD happen? -->
+- ...
+#### Actual behaviour:
+<!-- What IS happening? -->
+- ...
+#### Extra details:
+<!-- Please post any extra details that might help solve the issue -->
+- ...
+#### Additional logs:
+```'
+		# - Add log if given
+		[[ -f '/tmp/G_EXEC_LOG' ]] && cat '/tmp/G_EXEC_LOG' || echo '<!-- Please paste logs or related console output here -->'
+		echo '```'
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Error handled command execution wrapper
+	#-----------------------------------------------------------------------------------
+	# IMPORTANT:
+	# - Never pipe G_EXEC! "G_EXEC command | command" leads to G_EXEC not being able to unset G_EXEC_* variables and functions from originating shell or kill the originating script in case of error.
+	# Required input:
+	# - $@=<command>		| Command to execute
+	# Optional input:
+	# - $G_EXEC_DESC=<text>		| Command description to print instead of raw command string
+	# - $G_EXEC_RETRIES=<int>	| Amount of non-interactive retries in case of error, before doing interactive error prompt, defaults to 0
+	# - $G_EXEC_RETRY_DELAY=<int>	| Amount of seconds to sleep before retrying, defaults to 0
+	# - G_EXEC_PRE_FUNC(){}		| Function to call before every input command attempt, e.g. to re-evaluate variables
+	# - G_EXEC_POST_FUNC(){}	| Function to call after every input command attempt, e.g. to handle errors without error exit code
+	# - $G_EXEC_OUTPUT=1		| Print full command output instead of animated processing message
+	# - $G_EXEC_OUTPUT_COL='\e[90m'	| Override colour of command output via console colour code, requires $G_EXEC_OUTPUT=1
+	# - $G_EXEC_NOFAIL=1		| On error, override as success, only useful to replace verbose output by animated processing message, inherits $G_EXEC_NOHALT=1 and $G_EXEC_NOEXIT=1
+	# - $G_EXEC_NOHALT=1		| On error, print short error message only, skip error handler menu and do not exit script, inherits $G_EXEC_NOEXIT=1
+	# - $G_EXEC_NOEXIT=1		| On error, do not exit script, inherited by $G_EXEC_NOHALT=1
+	# - $G_EXEC_ARRAY_TEXT[]	| Add additional entries to error handler menu
+	# - $G_EXEC_ARRAY_ACTION[]	| Associative array, containing uneven $G_EXEC_ARRAY_TEXT[] values as keys and related commands as values
+	G_EXEC(){
+
+		local exit_code fp_log='/tmp/G_EXEC_LOG' attempt=1 acommand=("$@")
+		local ecommand=${acommand[*]//\\/\\\\}
+
+		# Enter retry loop
+		while :
+		do
+			declare -F G_EXEC_PRE_FUNC &> /dev/null && G_EXEC_PRE_FUNC
+			# Exit immediately if exit_code=0 was set by G_EXEC_PRE_FUNC
+			[[ $exit_code == 0 ]] && break
+
+			# Execute command, store output to $fp_log file and store exit code to $exit_code variable
+			# - Print full command output if $G_EXEC_OUTPUT=1 is given
+			if [[ $G_EXEC_OUTPUT == 1 ]]
+			then
+				# Print $G_EXEC_DESC if given, else raw input command string and show current non-interactive attempt count if $G_EXEC_RETRIES is given
+				G_DIETPI-NOTIFY 2 "${G_EXEC_DESC:-$ecommand}, please wait...${G_EXEC_RETRIES:+ ($attempt/$((G_EXEC_RETRIES+1)))}"
+				[[ $G_EXEC_OUTPUT_COL ]] && echo -ne "$G_EXEC_OUTPUT_COL"
+				"${acommand[@]}" 2>&1 | tee "$fp_log"
+				exit_code=${PIPESTATUS[0]}
+				[[ $G_EXEC_OUTPUT_COL ]] && echo -ne '\e[0m'
+
+			# - Else print animated processing message only
+			else
+				G_DIETPI-NOTIFY -2 "${G_EXEC_DESC:-$ecommand}${G_EXEC_RETRIES:+ ($attempt/$((G_EXEC_RETRIES+1)))}"
+				"${acommand[@]}" &> "$fp_log"
+				exit_code=$?
+			fi
+
+			declare -F G_EXEC_POST_FUNC &> /dev/null && G_EXEC_POST_FUNC
+
+			# Override exit code if $G_EXEC_NOFAIL=1 is given
+			[[ $G_EXEC_NOFAIL == 1 ]] && exit_code=0
+
+			### Success: Print OK and exit retry loop
+			[[ $exit_code == 0 ]] && { G_DIETPI-NOTIFY 0 "${G_EXEC_DESC:-$ecommand}"; break; }
+
+			### Error
+
+			# Retry non-interactively if current $attempt is <= $G_EXEC_RETRIES
+			(( $attempt <= ${G_EXEC_RETRIES:-0} )) && { (( $G_EXEC_RETRY_DELAY )) && G_SLEEP "$G_EXEC_RETRY_DELAY"; ((attempt++)); continue; }
+
+			# Print command output if not done already
+			[[ $G_EXEC_OUTPUT != 1 ]] && cat "$fp_log"
+
+			# Print FAILED, append raw command string if $G_EXEC_DESC is given
+			G_DIETPI-NOTIFY 1 "${G_EXEC_DESC:+$G_EXEC_DESC\n - Command: }$ecommand"
+
+			# Exit retry loop if $G_EXEC_NOHALT=1 is given
+			[[ $G_EXEC_NOHALT == 1 ]] && break
+
+			# Enter error handler menu loop in interactive mode
+			local last_whip_menu_item sent_bug_report fp_error_report='/tmp/G_EXEC_ERROR_REPORT' dietpi_version="v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC ($G_GITOWNER/$G_GITBRANCH)"
+			[[ $G_INTERACTIVE == 1 ]] && while :
+			do
+				G_WHIP_MENU_ARRAY=('Retry' ': Re-run the last command that failed')
+				# Add targeted solution suggestions, passed via $G_EXEC_ARRAY_TEXT[] and $G_EXEC_ARRAY_ACTION[${G_EXEC_ARRAY_TEXT[]}]
+				[[ $G_EXEC_ARRAY_TEXT ]] && G_WHIP_MENU_ARRAY+=("${G_EXEC_ARRAY_TEXT[@]}")
+				# Allow to open DietPi-Config if this error was not produced within DietPi-Config
+				pgrep -cf 'dietpi-config' &> /dev/null || G_WHIP_MENU_ARRAY+=('DietPi-Config' ': Edit network, APT/NTP mirror settings etc')
+				G_WHIP_MENU_ARRAY+=('Open subshell' ': Open a subshell to investigate or solve the issue')
+
+				# Allow to send bug report if it was produced by one of our scripts, excluding DietPi-Installer
+				[[ ${G_PROGRAM_NAME,,} == 'dietpi-'* && $G_PROGRAM_NAME != 'DietPi-Installer' ]] && G_WHIP_MENU_ARRAY+=('Send report' ': Upload bug report including system info to DietPi')
+
+				# Allow to print bug report template if it was produced by one of our scripts
+				[[ ${G_PROGRAM_NAME,,} == 'dietpi-'* ]] && G_WHIP_MENU_ARRAY+=('Print report' ': Print bug report template for GitHub or forum')
+
+				G_WHIP_MENU_ARRAY+=('' '●─ Devs only ')
+				G_WHIP_MENU_ARRAY+=('Change command' ': Adjust and rerun the command')
+
+				# Show "Ignore" on cancel button if $G_EXEC_NOEXIT=1 is given, else "Exit"
+				[[ $G_EXEC_NOEXIT == 1 ]] && G_WHIP_BUTTON_CANCEL_TEXT='Ignore' || G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				G_WHIP_DEFAULT_ITEM=${last_whip_menu_item:-Retry}
+				G_WHIP_MENU "${G_EXEC_DESC:+$(mawk '{gsub("\\\e[[0-9][;0-9]*m","");print}' <<< "$G_EXEC_DESC")\n} - Command: ${acommand[*]}
+ - Exit code: $exit_code
+ - DietPi version: $dietpi_version | HW_MODEL: $G_HW_MODEL | HW_ARCH: $G_HW_ARCH | DISTRO: $G_DISTRO
+ - Error log:
+$(<"$fp_log")" || break # Exit error handler menu loop on cancel
+
+				last_whip_menu_item=$G_WHIP_RETURNED_VALUE
+
+				if [[ $G_WHIP_RETURNED_VALUE == 'Retry' ]]; then
+
+					# Reset current $attempt and continue retry loop
+					attempt=1
+					continue 2
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'DietPi-Config' ]]; then
+
+					/boot/dietpi/dietpi-config
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Open subshell' ]]; then
+
+					G_WHIP_MSG 'A bash subshell will now open which allows you to investigate and/or fix the issue.
+\nPlease use the "exit" command when you are finished, to return to this error handler menu.'
+					# Prevent dietpi-login call in subshell
+					local reallow_dietpi_login=1
+					[[ $G_DIETPI_LOGIN ]] && reallow_dietpi_login=0
+					export G_DIETPI_LOGIN=1
+					bash &> /dev/tty < /dev/tty
+					(( $reallow_dietpi_login )) && unset -v G_DIETPI_LOGIN
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Send report' ]]; then
+
+					# Store error details to append to bug report upload
+					G_BUG_REPORT -c "${acommand[*]}" -? "$exit_code" > "$fp_error_report"
+
+					# Send report
+					/boot/dietpi/dietpi-bugreport 1 && sent_bug_report=1
+					read -rp '
+Press any key to continue...'
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Print report' ]]; then
+
+					echo -e '\e[41m---------------------------------------------------------------------
+- DietPi bug report template for GitHub or forum                    -
+- Please report at: https://github.com/MichaIng/DietPi/issues       -
+                or: https://dietpi.com/forum/c/troubleshooting/10   -
+- Copy and paste ONLY the BLUE lines below, replacing the template! -
+---------------------------------------------------------------------\e[44m'
+					# Add bug report ID if sent already
+					if [[ $sent_bug_report == 1 ]]
+					then
+						sed --follow-symlinks -i "/^- Date           | /a\- Bug report     | $G_HW_UUID" "$fp_error_report"
+						cat "$fp_error_report"
+					else
+						G_BUG_REPORT -c "${acommand[*]}" -? "$exit_code"
+					fi
+					echo -e '\e[41m---------------------------------------------------------------------\e[0m'
+					read -rp '
+Press any key to continue...'
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Change command' ]]; then
+
+					G_WHIP_DEFAULT_ITEM=${acommand[*]}
+					if G_WHIP_INPUTBOX 'Please enter/alter the command to be executed.
+\nNB: Please only use this solution if you know for sure that it will not cause follow up issues from the originating script. It will e.g. allow you to continue a certain software install, but if you edit the download link, the originating script might expect files which are not present.
+\nUse this with caution!'; then
+
+						G_DIETPI-NOTIFY 2 "Executing alternative command: ${G_WHIP_RETURNED_VALUE//\\/\\\\}"
+						$G_WHIP_RETURNED_VALUE
+						exit_code=$?
+						G_DIETPI-NOTIFY -1 "$exit_code" 'Alternative command execution'
+						# Exit retry loop if alternative command succeeded, else stay in menu loop and wait for key press to allow reviewing alternative command output
+						# shellcheck disable=SC2015
+						[[ $exit_code == 0 ]] && break 2 || read -rp 'Press any key to return to error handler menu...'
+
+					fi
+
+				# Attempt targeted solution, passed via $G_EXEC_ARRAY_TEXT[] and $G_EXEC_ARRAY_ACTION[${G_EXEC_ARRAY_TEXT[]}]
+				elif [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+					eval "${G_EXEC_ARRAY_ACTION[$G_WHIP_RETURNED_VALUE]}"
+
+				fi
+			done
+
+			# Error has not been solved, exit error handler menu loop
+			break
+		done
+
+		# Do not exit originating script if $G_EXEC_NOEXIT=1 or $G_EXEC_NOHALT=1 is given
+		local noexit
+		[[ $G_EXEC_NOEXIT == 1 || $G_EXEC_NOHALT == 1 ]] && noexit=1
+
+		# Cleanup
+		rm -f "$fp_log" "$fp_error_report"
+		unset -v G_EXEC_DESC G_EXEC_RETRIES G_EXEC_OUTPUT G_EXEC_OUTPUT_COL G_EXEC_NOFAIL G_EXEC_NOHALT G_EXEC_NOEXIT G_EXEC_ARRAY_TEXT G_EXEC_ARRAY_ACTION
+		unset -f G_EXEC_PRE_FUNC G_EXEC_POST_FUNC
+
+		# In case of unresolved error when exiting originating script, inform user and kill via SIGINT to prevent exiting from interactive shell session
+		[[ $exit_code == 0 || $noexit == 1 ]] || { G_DIETPI-NOTIFY 1 "Unable to continue, ${G_PROGRAM_NAME:-command} will now terminate."; kill -INT $$; }
+
+		# Else return exit code
+		return "$exit_code"
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Multithreading handler
+	#-----------------------------------------------------------------------------------
+	# Not yet compatible with dietpi global commands. single bash commands only with no error handling.
+	G_THREAD_START(){
+
+		# Run in blocking mode
+		if [[ $G_THREADING_ENABLED == 0 ]]; then
+
+			G_DIETPI-NOTIFY 2 "G_THREADING disabled, running command in blocking mode | $*"
+			"$@"
+
+		# Launch as background process
+		else
+
+			[[ $G_THREAD_COUNT =~ ^[0-9]+$ ]] || G_THREAD_COUNT=-1
+			((G_THREAD_COUNT++))
+			G_THREAD_COMMAND[$G_THREAD_COUNT]=$* # Store for later output with G_THREAD_WAIT
+
+			echo -1337 > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"
+			{ { G_INTERACTIVE=0 "$@" &> "/tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT"; echo $? > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"; } & disown; } &> /dev/null
+
+			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT | $*"
+
+		fi
+
+	}
+
+	G_THREAD_WAIT(){
+
+		#local wait_for_specific_thread_pid=-1
+		#[[ $1 ]] && wait_for_specific_thread_pid=$1
+
+		local i waiting_for exit_code
+
+		# Wait until all threads finished
+		while :
+		do
+			for i in "${!G_THREAD_COMMAND[@]}"
+			do
+				[[ -f /tmp/.G_THREAD_EXITCODE_$i && $(<"/tmp/.G_THREAD_EXITCODE_$i") == '-1337' ]] || continue
+				# Print what we are waiting for, update processing message if thread changed since last loop
+				[[ $waiting_for == "$i" ]] || G_DIETPI-NOTIFY -2 "G_THREAD_WAIT_$i | ${G_THREAD_COMMAND[$i]}"
+				waiting_for=$i
+				G_SLEEP 1
+				continue 2
+			done
+
+			break
+		done
+
+		G_DIETPI-NOTIFY 0 'G_THREAD: All threads finished'
+
+		# Check all thread's exit codes for issues
+		for i in "${!G_THREAD_COMMAND[@]}"
+		do
+			if [[ -r /tmp/.G_THREAD_EXITCODE_$i ]]; then
+
+				read -r exit_code < "/tmp/.G_THREAD_EXITCODE_$i"
+				(( $exit_code )) && G_WHIP_MSG "G_THREAD ERROR:\n - Command = ${G_THREAD_COMMAND[$i]}\n - Exit code = $exit_code\n\n$(<"/tmp/.G_THREAD_COMMAND_$i")"
+
+			else
+
+				G_DIETPI-NOTIFY 2 "DEBUG: /tmp/.G_THREAD_EXITCODE_$i does not exist or is not readable"
+
+			fi
+		done
+
+		rm -f /tmp/.G_THREAD*
+		unset -v G_THREAD_COUNT G_THREAD_COMMAND
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Network connection checks
+	#-----------------------------------------------------------------------------------
+	# Network connection check
+	# - Checks network connectivity by pinging a raw IPv4 address, in case an IPv6 address, and resolving a hostname, which must be publicly reachable at all time.
+	# - For IPv4, uses CONFIG_CHECK_CONNECTION_IP from dietpi.txt, else defaults to 9.9.9.9 (Quad9 DNS IP).
+	# - For IPv6, uses CONFIG_CHECK_CONNECTION_IPV6 from dietpi.txt, else defaults to 2620:fe::fe (Quad9 DNS IP).
+	# - For DNS, uses CONFIG_CHECK_DNS_DOMAIN from dietpi.txt, else defaults to dns9.quad9.net (Quad9 DNS domain).
+	# - Uses CONFIG_G_CHECK_URL_TIMEOUT + CONFIG_G_CHECK_URL_ATTEMPTS from dietpi.txt, else defaults to 10 seconds and 2 attempts (1 retry).
+	G_CHECK_NET()
+	{
+		# Obtain timeout
+		local timeout=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$timeout" 0 || timeout=10
+
+		# Obtain attempts
+		local attempts=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$attempts" 1 || attempts=2
+		local retries=$(( $attempts - 1 )) # 2 attempts = 1 retry
+
+		### Check IPv4 connectivity ###
+		# Add special options to the error handler menu
+		G_EXEC_ARRAY_TEXT=(
+
+			'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+			'Change IPv4 address' ': Change the IPv4 address used for this test'
+			'Network settings' ': Enter dietpi-network for network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
+
+			['Double timeout']='((acommand[4]*=2)); attempt=1; continue 2'
+			['Change IPv4 address']='/boot/dietpi/dietpi-config 20'
+			['Network settings']='/boot/dietpi/dietpi-network'
+		)
+		# Obtain IPv4 test address on every retry
+		G_EXEC_PRE_FUNC()
+		{
+			acommand[5]=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ ${acommand[5]} ]] || acommand[5]='9.9.9.9'
+			ecommand=${acommand[*]//\\/\\\\}
+		}
+		# Run check with given timeout and retries
+		G_EXEC_RETRIES=$retries
+		# - During non-interactive first run setup, allow up to 3 retries with 5 seconds delay. The ifup@.service has started, but the DHCP client may require some more time.
+		if (( $G_DIETPI_INSTALL_STAGE == 0 && $G_INTERACTIVE == 0 ))
+		then
+			(( $G_EXEC_RETRIES < 3 )) && G_EXEC_RETRIES=3
+			G_EXEC_RETRY_DELAY=5
+		fi
+		G_EXEC_DESC='Checking IPv4 network connectivity' G_EXEC ping -4nc 1 -W "$timeout" 'IP'
+
+		### Check IPv6 connectivity ###
+		# Add special options to the error handler menu
+		G_EXEC_ARRAY_TEXT=(
+
+			'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+			'Change IPv6 address' ': Change the IPv6 address used for this test'
+			'Disable IPv6' ': Disable IPv6 on your system and continue'
+			'Network settings' ': Enter dietpi-network for network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
+
+			['Double timeout']='((acommand[4]*=2)); attempt=1; continue 2'
+			['Change IPv6 address']='/boot/dietpi/dietpi-config 21'
+			['Disable IPv6']='/boot/dietpi/func/dietpi-set_hardware enableipv6 0; acommand=(:); attempt=1; continue 2'
+			['Network settings']='/boot/dietpi/dietpi-network'
+		)
+		# Exit error handler loop if no IPv6 default route is assigned, otherwise obtain IPv6 test address on every retry
+		G_EXEC_PRE_FUNC()
+		{
+			G_GET_NET -6 -q gateway > /dev/null && [[ $(ip -6 -br a s scope global to 2000::/3 2> /dev/null) ]] || { exit_code=0; return 0; }
+			acommand[5]=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IPV6=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ ${acommand[5]} ]] || acommand[5]='2620:fe::fe'
+			ecommand=${acommand[*]//\\/\\\\}
+		}
+		# Run check with given timeout and retries
+		G_EXEC_RETRIES=$retries
+		G_EXEC_DESC='Checking IPv6 network connectivity' G_EXEC ping -6nc 1 -W "$timeout" 'IP'
+
+		### Check DNS resolver ###
+		# Add special options to the error handler menu
+		G_EXEC_ARRAY_TEXT=(
+
+			'Change domain name' ': Change the domain name used for this test'
+			'Network settings' ': Enter dietpi-network for network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
+
+			['Change domain name']='/boot/dietpi/dietpi-config 22'
+			['Network settings']='/boot/dietpi/dietpi-network'
+		)
+		# Obtain test domain on every retry
+		G_EXEC_PRE_FUNC()
+		{
+			acommand[2]=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_DNS_DOMAIN=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ ${acommand[2]} ]] || acommand[2]='dns9.quad9.net'
+			ecommand=${acommand[*]//\\/\\\\}
+		}
+		# Run check with given retries
+		G_EXEC_RETRIES=$retries
+		G_EXEC_DESC='Checking DNS resolver' G_EXEC getent hosts 'DOMAIN'
+	}
+
+	# URL connection test
+	# - Checks a specific HTTP/HTTPS/FTP online resource via its URL
+	# - Required arguments:
+	#	$* = URL + optional curl arguments
+	G_CHECK_URL()
+	{
+		# Obtain timeout
+		local timeout=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$timeout" 0 || timeout=10
+
+		# Obtain attempts
+		local attempts=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$attempts" 1 || attempts=2
+
+		G_EXEC_ARRAY_TEXT=(
+
+			'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+			'Network settings' ': Enter dietpi-network for network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
+
+			['Double timeout']='((acommand[2]*=2)); attempt=1; continue 2'
+			['Network settings']='/boot/dietpi/dietpi-network'
+		)
+		# "--retry" only applies on "a timeout, an FTP 4xx response code or an HTTP 5xx response code", hence we loop ourself.
+		G_EXEC_RETRIES=$(( $attempts - 1 )) # 2 attempts = 1 retry
+		G_EXEC_DESC="Checking URL: $*" G_EXEC curl -ILfvm "$timeout" "$@"
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Print network details
+	#-----------------------------------------------------------------------------------
+	# Commands:
+	#	"gateway": Print the default gateway IP
+	#	"iface": Print the interface name
+	#	"ip": Print the IP address
+	# Options:
+	#	"-q": Hide all error messages that are not related to invalid arguments
+	#	"-4": Print info for interfaces with an IPv4 address only if available, else return 1
+	#	"-6": Print info for interfaces with an IPv6 address only if available, else return 1
+	#	"-t TYPE": Print info for interfaces of type TYPE only if available, else return 1
+	#		TYPE can be one of "eth" and "wlan".
+	#	"-i IFACE": Print info for the network interface named IFACE only it present, else return 1
+	# Notes:
+	#	Info is shown for the one matching interface, following the following priorities:
+	#	- 1. the interface which has the default gateway assigned
+	#	- 2. the first interface with state "UP"
+	#	- 3. the first interface with an IP address assigned
+	#	- 4. the first available interface
+	#	- If no interface exists, the function returns error 1.
+	#	If not defined, IPv4 addresses are shown if available, else IPv6 addresses if available.
+	G_GET_NET()
+	{
+		# Grab input
+		local quite=0 fam type iface command
+		while (( $# ))
+		do
+			case "$1" in
+				'-q') quite=1;;
+				'-'[46]) fam=$1;;
+				'-t') shift; type=$1;;
+				'-i') shift; iface=$1;;
+				'gateway'|'iface'|'ip') command=$1;;
+				*) G_DIETPI-NOTIFY 1 "An invalid argument \"${1:-<empty>}\" was given."; return 1;;
+			esac
+			shift
+		done
+
+		# A command is required
+		[[ $command ]] || { G_DIETPI-NOTIFY 1 "No command was given."; return 1; }
+
+		# Match an interface name against the requested type: "wlan" = has a wireless subdir, "eth" = has a device subdir but no wireless one, else fall back to prefix match
+		Type_Match()
+		{
+			[[ $type ]] || return 0
+			if [[ $type == 'wlan' ]]
+			then
+				[[ -d /sys/class/net/$1/wireless ]]
+
+			elif [[ $type == 'eth' ]]
+			then
+				local type
+				read -r type < "/sys/class/net/$1/type" 2> /dev/null
+				[[ $type == 1 && ! ( -d /sys/class/net/$1/bridge || -d /sys/class/net/$1/bonding || -e /sys/class/net/$1/tun_flags ) ]]
+			else
+				[[ $1 == $type* ]]
+			fi
+		}
+		trap 'unset -f Type_Match' RETURN
+
+		# Early return if given interface does not exists or does not match given type
+		if [[ $iface ]]
+		then
+			if [[ ! -d /sys/class/net/$iface ]]
+			then
+				(( $quite )) || G_DIETPI-NOTIFY 1 "The given interface \"$iface\" does not exist."
+				return 1
+
+			elif ! Type_Match "$iface"
+			then
+				(( $quite )) || G_DIETPI-NOTIFY 1 "The given interface \"$iface\" is not of type \"$type\"."
+				return 1
+			fi
+		fi
+
+		# Get default gateway if requested or no interface given
+		local ip if
+		if [[ $command == 'gateway' || ! $iface ]]
+		then
+			local gateway
+			[[ $fam != '-6' ]] && read -r gateway if < <(ip r l 0/0 ${iface:+dev "$iface"} | mawk '{for(i=0;i<NF;i++) if($i=="via") {g=$(i+1)} else if($i=="dev") {d=$(i+1)}; print g,d;exit}')
+			[[ ! $gateway && $fam != '-4' ]] && read -r gateway if < <(ip -6 r l ::/0 ${iface:+dev "$iface"} | mawk '{for(i=0;i<NF;i++) if($i=="via") {g=$(i+1)} else if($i=="dev") {d=$(i+1)}; print g,d;exit}')
+
+			# ip r does not print the interface name if one was given, so use the given one to check for type.
+			[[ $iface ]] && if=$iface
+
+			# Print default gateway if requested
+			if [[ $command == 'gateway' ]]
+			then
+				if [[ $gateway ]]
+				then
+					# Check for interface type
+					if ! Type_Match "$if"
+					then
+						(( $quite )) || G_DIETPI-NOTIFY 1 "The default gateway is not assigned to any interface of type \"$type\"."
+						return 1
+					fi
+					echo "$gateway"
+				else
+					(( $quite )) || G_DIETPI-NOTIFY 1 "A default gateway${fam:+ for IPv${fam#-}}${iface:+ on interface \"$iface\"} does not exist."
+					return 1
+				fi
+				return 0
+			fi
+
+			# Print interface/IP address if matching default gateway was found
+			if [[ $gateway ]] && Type_Match "$if"
+			then
+				iface=$if
+				# shellcheck disable=SC2086
+				[[ $command == 'ip' ]] && ip=$(ip -br $fam a s dev "$iface" | mawk '{print $3;exit}') ip=${ip%/*}
+				echo "${!command}"
+				return 0
+			fi
+		fi
+
+		# If any Ethernet interface is wanted, multiple are available but none is even "ip link set up", do this for all of them to prefer those with a carrier signal
+		local state mac details aiface=()
+		if [[ $command == 'iface' && $type == 'eth' && $iface$fam == '' ]]
+		then
+			while read -r if state mac details
+			do
+				if=${if%%@*} # Strip "@foo" link/peer suffix which "ip" prints e.g. for veth and VLAN interfaces
+				Type_Match "$if" || continue
+				[[ $state == 'UP' || $details == *'UP'* ]] && { aiface=(); break; }
+				aiface+=("$if")
+
+			done < <(ip -br l sh)
+
+			if (( ${#aiface[@]} > 1 ))
+			then
+				G_DIETPI-NOTIFY -2 'Enabling all Ethernet adapters to detect cable connection' >&2
+				for if in "${aiface[@]}"; do ip l s "$if" up; done
+				G_SLEEP 5
+				G_DIETPI-NOTIFY 2 'Enabling all Ethernet adapters to detect cable connection' >&2
+			fi
+		fi
+
+		local if_final ip_final if_down
+		# shellcheck disable=SC2086
+		while read -r if state ip
+		do
+			if=${if%%@*} # Strip "@foo" link/peer suffix which "ip" prints e.g. for veth and VLAN interfaces
+			[[ $if == 'lo' ]] && continue
+			Type_Match "$if" || continue
+
+			# Cut off secondary IP addresses and CIDR mask
+			ip=${ip%%/*}
+
+			# State UP which implies a carrier signal but not necessarily an IP address (at least if IPv6 is disabled)
+			if [[ $state == 'UP' ]]
+			then
+				# Return directly if as well an IP address is assigned
+				if [[ $ip ]]
+				then
+					iface=$if
+					# Set down again interfaces which were set up to check for a carrier signal
+					(( ${#aiface[@]} > 1 )) && for if in "${aiface[@]}"; do ip l s "$if" down; done
+					echo "${!command}"
+					return 0
+
+				# If an interface is wanted, prefer those with state UP even over those with an IP (but state DOWN)
+				elif [[ $command == 'iface' && ! $if_final ]]
+				then
+					if_final=$if
+					continue
+				fi
+			fi
+
+			# Store info in separate variables to return if no UP state interface was found
+			if [[ $ip && ! $ip_final ]]
+			then
+				if_down=$if
+				ip_final=$ip
+
+			elif [[ ! $if_down ]]
+			then
+				if_down=$if
+			fi
+
+		done < <(ip -br $fam a ${iface:+s dev "$iface"})
+
+		# Set down again interfaces which were set up to check for a carrier signal
+		(( ${#aiface[@]} > 1 )) && for if in "${aiface[@]}"; do ip l s "$if" down; done
+
+		# Return final values
+		ip=$ip_final
+		if [[ $command == 'ip' && ! $ip ]]
+		then
+			(( $quite )) || G_DIETPI-NOTIFY 1 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"} with an IP${fam:+v${fam#-}} address does not exist."
+			return 1
+
+		elif [[ $command == 'iface' && ! ${if_final:=$if_down} ]]
+		then
+			(( $quite )) || G_DIETPI-NOTIFY 1 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"}${fam:+ with an IPv${fam#-} address} does not exist."
+			return 1
+		fi
+		iface=$if_final
+		echo "${!command}"
+		return 0
+	}
+
+	# Print public IP address and location info
+	# - Optional arguments:
+	#	-t <timeout>: Set timeout in seconds, supports floats, default: 3
+	G_GET_WAN_IP()
+	{
+		# Defaults
+		local timeout=3
+		# Inputs
+		while (( $# ))
+		do
+			# shellcheck disable=SC2015
+			case $1 in
+				'-t') shift; (( ${1/.} )) && timeout=$1 || { G_DIETPI-NOTIFY 1 "Invalid timeout \"$1\", aborting..."; return 1; };;
+				*) G_DIETPI-NOTIFY 1 "Invalid argument \"$1\", aborting..."; return 1;;
+			esac
+			shift
+		done
+		curl -sSfLm "$timeout" 'https://dietpi.com/geoip'
+	}
+
+	# $1 = directory to test permissions support
+	# Returns 0=ok 1=failed
+	G_CHECK_FS_PERMISSION_SUPPORT()
+	{
+		local input=$1 exit_code=1
+
+		while :
+		do
+			if ! mkdir -p "$input"
+			then
+				G_WHIP_MSG "Error creating directory $input, unable to check filesystem permissions"
+				break
+			fi
+
+			local fp_target="$input/.dietpi-fs_permission_test"
+			if ! > "$fp_target"
+			then
+				G_WHIP_MSG "Error creating test file $fp_target, unable to check filesystem permissions"
+				break
+			fi
+
+			# Apply and check permissions support, twice (just in case the current value is already set)
+			local permissions_failed=0
+
+			chmod 600 "$fp_target"
+			if [[ $(stat -c '%a' "$fp_target") != '600' ]]
+			then
+				permissions_failed=1
+			else
+				chmod 644 "$fp_target"
+				[[ $(stat -c '%a' "$fp_target") != '644' ]] && permissions_failed=1
+			fi
+
+			if (( $permissions_failed ))
+			then
+				G_WHIP_MSG "ERROR: Filesystem does not support permissions (e.g.: FAT16/32):\n\n$fp_target\n\nPlease select a different drive and/or format it with ext4, ensuring support for filesystem permissions.\n\nUnable to continue, aborting..."
+				break
+			fi
+
+			# Else ok
+			exit_code=0
+			break
+		done
+
+		rm -f "$fp_target"
+		return "$exit_code"
+	}
+
+	#-----------------------------------------------------------------------------------
+	# APT: Non-interactive and error-handled wrappers for apt-get commands
+	#-----------------------------------------------------------------------------------
+	# Check for missing kernel modules, e.g. after a kernel upgrade, but exclude containers
+	G_CHECK_KERNEL()
+	{
+		[[ $G_HW_MODEL == 75 || -d /lib/modules/$(uname -r) ]] || grep -zaq '^container=' /proc/1/environ
+	}
+
+	# apt-get install
+	G_AGI()
+	{
+		# Return if no argument given
+		(( $# )) || { G_DIETPI-NOTIFY 2 'G_AGI | No input package given. Aborting...'; return 0; }
+
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		G_EXEC_DESC="\e[0mAPT install \e[33m$*\e[0m"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y install "$@"
+
+		# Remove all downloaded DEB packages without the lists cache
+		# shellcheck disable=SC2046
+		rm -Rf $(apt-get -s clean | mawk '{print $2;exit}')
+
+		# Ignore "apt-get clean" errors
+		return 0
+	}
+
+	# apt-get purge
+	G_AGP()
+	{
+		# Return if no argument given
+		(( $# )) || { G_DIETPI-NOTIFY 2 'G_AGP | No input package given. Aborting...'; return 0; }
+
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		# Attempt to purge only installed packages, check on every G_EXEC loop, force succeed if none were found
+		G_EXEC_PRE_FUNC()
+		{
+			local apackages=()
+			mapfile -t apackages < <(dpkg --get-selections "${acommand[@]:3}" 2> /dev/null | mawk '{print $1}')
+			# shellcheck disable=SC2015
+			[[ ${apackages[0]} ]] && acommand=("${acommand[@]::3}" "${apackages[@]}") || acommand=(G_DIETPI-NOTIFY 2 'None of the packages are currently installed. Aborting...')
+		}
+
+		G_EXEC_DESC="\e[0mAPT purge \e[33m$*\e[0m"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y autopurge "$@"
+	}
+
+	# apt-get autopurge
+	G_AGA()
+	{
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		G_EXEC_DESC="\e[0mAPT autopurge${*:+ \e[33m$*\e[0m}"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y autopurge "$@"
+	}
+
+	# apt-get -f install
+	G_AGF()
+	{
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		G_EXEC_DESC="\e[0mAPT fix${*:+ \e[33m$*\e[0m}"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -yf install "$@"
+
+		# Remove all downloaded DEB packages without the lists cache
+		# shellcheck disable=SC2046
+		rm -Rf $(apt-get -s clean | mawk '{print $2;exit}')
+
+		# Ignore "apt-get clean" errors
+		return 0
+	}
+
+	# apt-get clean + update
+	# - $1 = -f: Store number of available APT upgrades to file, which defaults to /run/dietpi/.apt_updates
+	#	$2 = Optional file path to store number of available APT upgrades to
+	# - $1 = -v: Store number of available APT upgrades to variable, which defaults to G_AGUP_COUNT, and list of available APT upgrades to variable G_AGUP_LIST
+	#	$2 = Optional variable name to store number of available APT upgrades to
+	# - $1 = -F: Force update even if last one was done less than an hour ago, sources lists and architectures were not changed in between, and the available update count is not updated with "-f"/"-v" options. This should never be needed unless one wants to sync a known upstream repo update from within the last hour, or if installs/upgrades run into 404 errors, of course.
+	# shellcheck disable=SC2120
+	G_AGUP()
+	{
+		# If not enforced, skip if last APT update was less than an our ago
+		if [[ ! $1 ]]
+		then
+			# Obtain path of downloaded lists
+			local dir files=()
+			eval "$(apt-config shell dir 'Dir::State::lists/d')"
+			mapfile -t files < <(find /etc/apt/sources.list{,.d} /var/lib/dpkg/arch 2> /dev/null)
+			# shellcheck disable=SC2068
+			[[ -d $dir/partial && $(find "$dir/partial" -mmin -60 ${files[@]/#/-newer } -print -quit) ]] && { G_DIETPI-NOTIFY 2 'Skipping APT update, as last call was less than an hour ago and neither sources lists nor architectures changed since.'; return 0; }
+		fi
+
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		# Clean cache before every update, which can corrupt and gets fully rewritten anyway
+		G_EXEC_PRE_FUNC(){ apt-get clean; }
+
+		# Detect out of sync system clock: Sync it automatically once and retry, else offer it in the error handler menu
+		if [[ $G_DIETPI_INSTALL_STAGE != 2 || $(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) == [1-4] ]] && (( $G_HW_MODEL != 75 )) && ! grep -zaq '^container=' /proc/1/environ
+		then
+			local timesync_done=0
+			G_EXEC_ARRAY_TEXT=('Sync clock' ': Sync the system clock and retry')
+			declare -A G_EXEC_ARRAY_ACTION=(['Sync clock']='/boot/dietpi/func/dietpi-timesync 1; attempt=1; continue 2')
+			G_EXEC_POST_FUNC()
+			{
+				(( $exit_code )) || return 0
+				(( $timesync_done )) && return 0
+				grep -q 'was created after the --not-after date\|is not yet valid\|Release file for .* is not valid yet\|Not live until' "$fp_log" || return 0
+				timesync_done=1
+				G_DIETPI-NOTIFY 2 'System clock seems to be out of sync, syncing it once and retrying APT update ...'
+				/boot/dietpi/func/dietpi-timesync 1
+				((attempt--))
+			}
+		fi
+
+		G_EXEC_DESC='\e[0mAPT update'
+		G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y -eany update
+
+		if [[ $1 == '-'[fv] ]]
+		then
+			local list=()
+			mapfile -t list < <(apt -qq list --upgradeable 2> /dev/null) # Mute "apt" CLI warning
+			local count=${#list[@]}
+			if [[ $1 == '-f' ]]
+			then
+				local file=${2:-/run/dietpi/.apt_updates}
+				if (( $count ))
+				then
+					G_DIETPI-NOTIFY 2 "Storing number of available APT upgrades to file: $file"
+					echo "$count" > "$file"
+				else
+					G_DIETPI-NOTIFY 2 "No APT upgrades were found, not creating file: $file"
+					[[ -f $file ]] && rm "$file"
+				fi
+
+			elif [[ $1 == '-v' ]]
+			then
+				IFS=$'\n' G_AGUP_LIST=${list[*]}; unset -v IFS
+				local var=${2:-G_AGUP_COUNT}
+				if (( $count ))
+				then
+					G_DIETPI-NOTIFY 2 "Storing number of available APT upgrades to variable: $var"
+					declare -g "$var=$count"
+				else
+					G_DIETPI-NOTIFY 2 "No APT upgrades were found, not creating variable: $var"
+					unset -v "$var"
+				fi
+			fi
+		fi
+
+		# Ignore "apt list" errors
+		return 0
+	}
+
+	# apt-get upgrade
+	G_AGUG()
+	{
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		G_EXEC_DESC="\e[0mAPT upgrade${*:+ \e[33m$*\e[0m}"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --with-new-pkgs upgrade "$@"
+
+		# Remove all downloaded DEB packages without the lists cache
+		# shellcheck disable=SC2046
+		rm -Rf $(apt-get -s clean | mawk '{print $2;exit}')
+
+		# Ignore "apt-get clean" errors
+		return 0
+	}
+
+	# apt-get dist-upgrade
+	G_AGDUG()
+	{
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		G_EXEC_DESC="\e[0mAPT dist-upgrade${*:+ \e[33m$*\e[0m}"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y dist-upgrade "$@"
+
+		# Remove all downloaded DEB packages without the lists cache
+		# shellcheck disable=SC2046
+		rm -Rf $(apt-get -s clean | mawk '{print $2;exit}')
+
+		# Ignore "apt-get clean" errors
+		return 0
+	}
+
+	# Checks for required APT packages, installs if needed.
+	# $@ = list of required packages
+	#	NB: automatically error handled (G_EXEC)
+	G_AG_CHECK_INSTALL_PREREQ()
+	{
+		# Return if no argument given
+		(( $# )) || return 0
+
+		G_DIETPI-NOTIFY 2 "Checking for required APT packages: \e[33m$*"
+
+		G_CHECK_ROOT_USER "$@" || return 0
+
+		local i apackages=() arch=$(dpkg --print-architecture)
+		for i in "$@"
+		do
+			if [[ $i == *':'* ]]
+			then
+				dpkg-query -s "$i" 2> /dev/null | grep -q '^Status: install ok installed$' || apackages+=("$i")
+			else
+				dpkg-query -s "$i:$arch" "$i:all" 2> /dev/null | grep -q '^Status: install ok installed$' || apackages+=("$i")
+			fi
+		done
+		[[ ${apackages[0]} ]] || return 0
+
+		G_AGUP
+		G_AGI "${apackages[@]}"
+	}
+
+	#-----------------------------------------------------------------------------------
+	# MISC: Commands
+	#-----------------------------------------------------------------------------------
+	# Treesize
+	# - $1 = Optional input directory, e.g.: G_TREESIZE /var/cache/apt
+	G_TREESIZE()
+	{
+		du -B 1 -d 1 ${1:+"$1"} | sort -nr | mawk '
+		BEGIN { split("bytes,KiB,MiB,GiB,TiB", unit, ",") }
+		{
+			u=1
+			while ($1>=1024) { $1=$1/1024; u+=1 }
+			$1=sprintf("%.1f %s", $1, unit[u])
+			print $0
+		}'
+	}
+
+	# Returns current CPU temp 'C
+	# - print_full_info=1	Optional input to print full colour text output and temp warnings
+	G_OBTAIN_CPU_TEMP()
+	{
+		# Read CPU temp from sysfs node, using an array of possible paths, ordered by priority
+		local custom afp_temperature=() i temp
+
+		# Custom entry first
+		custom=$(sed -n '/^[[:blank:]]*CONFIG_CPU_TEMP_PATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $custom && $custom != 'auto' ]] && afp_temperature+=("$custom")
+
+		# Board-specific additions
+		case $G_HW_MODEL in
+			21) afp_temperature+=('/sys/devices/platform/coretemp.[0-9]/hwmon/hwmon[0-9]/temp[1-9]_input');; # Intel Mini PCs: https://github.com/MichaIng/DietPi/issues/3172, https://github.com/MichaIng/DietPi/issues/3412
+			15|52) afp_temperature+=('/sys/class/thermal/thermal_zone1/temp');; # Odroid N2/ASUS
+			110) afp_temperature+=('/sys/class/thermal/thermal_zone8/temp');; # Orange Pi 6: The two big A720 cores
+			*) :;;
+		esac
+
+		# Generic last
+		afp_temperature+=(
+				'/sys/class/thermal/thermal_zone0/temp'
+				'/sys/devices/platform/sunxi-i2c.0/i2c-0/0-0034/temp1_input'
+				'/sys/class/hwmon/hwmon0/device/temp_label'
+				'/sys/class/hwmon/hwmon0/temp2_input'
+				'/sys/class/hwmon/hwmon0/temp1_input' # Odroid C1 Armbian legacy Linux 5.4.40: https://dietpi.com/forum/t/3976/17
+				'/sys/class/thermal/thermal_zone1/temp' # Roseapple Pi, probably OrangePi's: https://dietpi.com/forum/t/4993
+				'/sys/class/hwmon/hwmon[0-9]/temp[1-9]_input'
+				'/sys/class/thermal/thermal_zone[0-9]/temp'
+		)
+
+		# Coders NB: Do NOT quote the array to allow wildcard path glob expansion!
+		# shellcheck disable=SC2068
+		for i in ${afp_temperature[@]}
+		do
+			[[ -f $i ]] || continue
+			read -r temp < "$i"
+			[[ $temp -gt 0 ]] && break # Trust only positive temperatures for now (strings are treated as "0")
+		done
+
+		# Format output
+		# - Check for valid value: We must always return a value, due to VM lacking this feature + benchmark online
+		if [[ $temp -lt 1 ]]
+		then
+			echo 'N/A'
+		else
+			# 2/5 digit output?
+			(( $temp >= 200 )) && temp=$(( $temp / 1000 ))
+
+			if [[ $print_full_info != 1 ]]
+			then
+				echo "$temp"
+			else
+				local temp_f=$(( $temp * 9/5 + 32 ))
+				if (( $temp >= 70 ))
+				then
+					echo -e "\e[1;31mWARNING: $temp °C / $temp_f °F : Reducing the life of your device\e[0m"
+
+				elif (( $temp >= 60 ))
+				then
+					echo -e "\e[38;5;202m$temp °C / $temp_f °F \e[90m: Running hot, not recommended\e[0m"
+
+				elif (( $temp >= 50 ))
+				then
+					echo -e "\e[1;33m$temp °C / $temp_f °F \e[90m: Running warm, but safe\e[0m"
+
+				elif (( $temp >= 40 ))
+				then
+					echo -e "\e[1;32m$temp °C / $temp_f °F \e[90m: Optimal temperature\e[0m"
+
+				elif (( $temp >= 30 ))
+				then
+					echo -e "\e[1;36m$temp °C / $temp_f °F \e[90m: Cool runnings\e[0m"
+				else
+					echo -e "\e[1;36m$temp °C / $temp_f °F \e[90m: Who put me in the freezer!\e[0m"
+				fi
+			fi
+		fi
+	}
+
+	# Returns current CPU usage in %
+	G_OBTAIN_CPU_USAGE(){
+
+		local usage=0
+
+		# ps: inaccurate but fast
+		while read -r line # Aside reading raw, -r removes leading and trailing white spaces each line
+		do
+			line=${line/.} # Remove decimal dot
+			((usage+=${line#0})) # Remove leading zero, if present, then sum up
+
+		done < <(ps --no-headers -eo %cpu) # Single core usage in xy.z
+
+		# ps returns single core usage, so we divide by core count
+		usage=$(printf '%.1f' "$(($usage*10/$G_HW_CPU_CORES+1))e-2") # Divide by 10 to compensate decimal dot removal, re-add decimal dot via printf conversion but assure last digit is rounded correctly
+
+		echo "$usage"
+
+	}
+
+	# Check available free space on path, against input value (MiB)
+	# - Returns 0=Ok, 1=insufficient space available
+	#	If $2 is not used, returns available space in MiB | info_autoscale=1 # Scales MiB to GiB if required and prints unit
+	# - $1 = path
+	# - $2 = Optional, free space (MiB)
+	#	EG: if (( $(G_CHECK_FREESPACE /path 100) )); then
+	G_CHECK_FREESPACE(){
+
+		local info_autoscale=${info_autoscale:-0}
+		local return_value=1
+		local input_path=$1
+		local input_required_space=$2
+		local available_space=$(df -m --output=avail "$input_path" | mawk 'NR==2 {print $1}')
+
+		if ! disable_error=1 G_CHECK_VALIDINT "$available_space"; then
+
+			G_WHIP_MSG 'G_CHECK_FREESPACE: Invalid integer from df result'
+
+		elif [[ ! $input_required_space ]]; then
+
+			(( $info_autoscale )) && { (( $available_space > 9999 )) && available_space="$(( $available_space / 1024 )) GiB" || available_space+=' MiB'; }
+			echo "$available_space"
+			return_value=0
+
+		else
+
+			(( $available_space > $input_required_space )) && return_value=0
+			G_DIETPI-NOTIFY "$return_value" "Free space check: path=$input_path | available=$available_space MiB | required=$input_required_space MiB"
+
+		fi
+
+		return "$return_value"
+
+	}
+
+	# G_CHECK_VALIDINT | Simple test to verify if a variable is a valid integer.
+	# $1=input
+	# $2=Optional Min value range
+	# $3=Optional Max value range
+	#	disable_error=1 to disable notify/whiptail invalid value when received
+	# 1=no | scripts killed automatically
+	# 0=yes
+	# Usage = if G_CHECK_VALIDINT input; then
+	G_CHECK_VALIDINT(){
+
+		local input=$1 min=$2 max=$3 return_value=1
+
+		if [[ $input =~ ^-?[0-9]+$ ]]; then
+
+			if [[ $min =~ ^-?[0-9]+$ ]]; then
+
+				if (( $input >= $min )); then
+
+					if [[ $max =~ ^-?[0-9]+$ ]]; then
+
+						if (( $input <= $max )); then
+
+							return_value=0
+
+						elif [[ $disable_error != 1 ]]; then
+
+							G_WHIP_MSG "Input value \"$input\" is higher than allowed \"$max\". No changes applied."
+
+						fi
+
+					else
+
+						return_value=0
+
+					fi
+
+				elif [[ $disable_error != 1 ]]; then
+
+					G_WHIP_MSG "Input value \"$input\" is lower than allowed \"$min\". No changes applied."
+
+				fi
+
+			else
+
+				return_value=0
+
+			fi
+
+		elif [[ $disable_error != 1 ]]; then
+
+			G_WHIP_MSG "Invalid input value \"$input\". No changes applied."
+
+		fi
+
+		unset -v disable_error
+		return "$return_value"
+
+	}
+
+	# Verifies the integrity of the DietPi userdata folder/symlink, based on where it should be physically. Basically, checks if user removed the USB drive with userdata on it.
+	#	NB: As this is considered a critical (if failed), current scripts will be exited automatically
+	# 1=fail
+	# 0=ok
+	G_CHECK_USERDATA(){
+
+		local return_value=0 fp_actual='/mnt/dietpi_userdata'
+
+		# Symlinked?
+		if [[ -L '/mnt/dietpi_userdata' ]]
+		then
+			# Check physical location exists (is mounted)
+			fp_actual=$(readlink -f /mnt/dietpi_userdata)
+			[[ -d $fp_actual ]] || return_value=1
+		fi
+
+		G_DIETPI-NOTIFY "$return_value" "DietPi-Userdata validation: $fp_actual"
+		(( $return_value )) || return 0
+
+		G_WHIP_MSG "[FAILED] DietPi-Userdata validation\n\nDietPi was unable to verify the existence of the userdata directory ($fp_actual).\n\nPlease ensure all previous external drives are connected and functional, before trying again.\n\nUnable to continue, exiting."
+		kill -INT $$ # kill all current scripts, excluding shell
+		return "$return_value"
+	}
+
+	# Prompt user to create a backup before system changes. Exit existing scripts if failed.
+	G_PROMPT_BACKUP(){
+
+		[[ $G_PROMPT_BACKUP_DISABLED == 1 ]] && return 0
+
+		G_WHIP_YESNO 'Would you like to create (or update) a "DietPi-Backup" of the system, before proceeding?\n\n"DietPi-Backup" creates a system restore point, which can be recovered if unexpected issues occur.\n\nFor more information on "DietPi-Backup", please use the link below:\n - https://dietpi.com/docs/dietpi_tools/#dietpi-backup-backuprestore' || return 0
+
+		/boot/dietpi/dietpi-backup 1
+		local exit_code=$?
+
+		G_DIETPI-NOTIFY -1 "$exit_code" 'DietPi-Backup'
+		(( $exit_code )) || return 0
+
+		# Kill current scripts, excluding shell
+		G_WHIP_MSG '[FAILED] DietPi-Backup was unable to complete sucessfully.\n\nTo avoid issues, the current program will now be terminated.\n\nLog file: /var/log/dietpi-backup.log'
+		kill -INT $$
+		return 1
+
+	}
+
+	# If file/folder exists, backup to *.bak_DDMMYYY
+	G_BACKUP_FP(){
+
+		local ainput_string=("$@")
+		local fp_db_log='/var/lib/dietpi/logs/G_BACKUP_FP.db'
+		local print_fp_db_info=0
+
+		local i
+		for i in "${ainput_string[@]}"
+		do
+			[[ -e $i ]] || continue
+
+			local fp_backup_target="$i.bak_$(date +%d%m%y)"
+			local index=0
+			while [[ -e ${fp_backup_target}_$index ]]
+			do
+				((index++))
+			done
+
+			local notify_code=1
+			if cp -a "$i" "${fp_backup_target}_$index"; then
+
+				notify_code=0
+				print_fp_db_info=1
+				echo "${fp_backup_target}_$index # $G_PROGRAM_NAME" >> "$fp_db_log"
+
+			fi
+
+			G_DIETPI-NOTIFY "$notify_code" "$i: backup to ${fp_backup_target}_$index"
+		done
+
+		(( $print_fp_db_info )) && G_DIETPI-NOTIFY 2 "For a full list of backup items, please see $fp_db_log"
+
+	}
+
+	# Apply and update to different branch
+	G_DEV_BRANCH()
+	{
+		G_CHECK_ROOT_USER "$@" || return 0
+		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$1" /boot/dietpi.txt
+		/boot/dietpi/dietpi-update -1
+	}
+
+	# Install test kernel/bootloader/firmware
+	# - $1: branch (optional)
+	G_DEV_TEST_FIRMWARE()
+	{
+		G_CHECK_ROOT_USER "$@" || return 0
+		local branch=$1 apackages=()
+		[[ $branch ]] || branch=$(uname -r) branch=${branch#*-} branch=${branch%%-*}
+		mapfile -t apackages < <(dpkg-query -l | mawk -v "branch=$branch" '$1=="ii" && match($2,"^(linux-(image|dtb|headers|libc-dev)-"branch"-|linux-u-boot-.*-"branch"$|armbian-firmware$|firmware-(quartz64[ab]|soquartz)$|linux-headers-quartz64$|linux-image-(star64|visionfive2)$)") {print "https://dietpi.com/downloads/binaries/testing/"$2".deb"}')
+		[[ ${apackages[0]} ]] || { G_DIETPI-NOTIFY 1 'No matching packages are installed on your system, aborting ...'; return 1; }
+		# Orange Pi 5 Max/Ultra: Install kernel build with bcmdhd WiFi module configured for SDIO rather than USB
+		(( $G_HW_MODEL == 91 || $G_HW_MODEL == 94 )) && apackages=("${apackages[@]/vendor-rk35xx/vendor-rk35xx_bcmdhd-sdio}")
+		G_EXEC cd /tmp
+		G_EXEC_DESC="Downloading packages: ${apackages[*]##*/}" G_EXEC rm -f "${apackages[@]##*/}"
+		wget "${apackages[@]}"
+		for i in "${!apackages[@]}"; do [[ -f ${apackages[i]##*/} ]] || unset -v 'apackages[i]'; done
+		(( ${#apackages[@]} )) || { G_DIETPI-NOTIFY 1 'None of the packages could be downloaded, aborting ...'; return 1; }
+		G_EXEC_OUTPUT=1 G_EXEC dpkg -i "${apackages[@]##*/}"
+	}
+
+	# Inject setting into config file: First tries to replace old setting, else commented setting and otherwise adds to end of file.
+	# Usage:
+	# - $1 Setting pattern to find existing setting with grep extended regular expression support
+	# - $2 Target setting + value, to inject into config file: After bash string expansion (e.g. variables), everything else will be taken literally, thus no further escaping is required.
+	# - $3 Path to config file
+	# - $4 (optional) Line pattern after which the setting will be added instead of end of file with grep extended regular expression support
+	# - GCI_PASSWORD=1 G_CONFIG_INJECT, password entry, do not print raw output to screen.
+	# - GCI_PRESERVE=1 G_CONFIG_INJECT preserves current setting, if present.
+	# - GCI_BACKUP=1 G_CONFIG_INJECT creates a backup before editing the file, if backup does not yet exist, to: $3.bak
+	# - GCI_NEWLINE=1 G_CONFIG_INJECT explicitly expands newlines \n within $2, which by default are taken literally
+	#	NB: Be careful with this, since pattern matching is only done per line which can lead to doubled lines when applying G_CONFIG_INJECT a second time.
+	# NB:
+	# - Within double quotes "", as usual, escape literally meant double quotes and dollar signs $ with leading backslash \.
+	# - Within single quotes '', as usual, escape literally meant single quotes via: '\'' # End leading string; Add escaped single quote; Start trailing string
+	# - Additionally in case of extended regular expression support ($1 and $4), the following characters need to be escaped via backslash \, if wanted literally:
+	#	\ . + * ? [ ( { ^ & $ |
+	# Example:
+	# - G_CONFIG_INJECT 'prefer-family[[:blank:]=]' 'prefer-family = IPv4' /etc/wgetrc
+	G_CONFIG_INJECT()
+	{
+		[[ $G_PROGRAM_NAME ]] || local G_PROGRAM_NAME='G_CONFIG_INJECT'
+		local pattern=${1//\//\\\/}
+		local setting_raw=$2
+		local setting=${2//\\/\\\\}; setting=${setting//./\\.}; setting=${setting//+/\\+}; setting=${setting//\*/\\\*}; setting=${setting//\?/\\\?}; setting=${setting//[/\\[}
+		setting=${setting//\(/\\\(}; setting=${setting//\{/\\\{}; setting=${setting//^/\\^}; setting=${setting//&/\\&}; setting=${setting//$/\\$}; setting=${setting//|/\\|}; setting=${setting//\//\\\/}
+		[[ $GCI_NEWLINE == 1 ]] && setting=${setting//\\\\n/\\n}
+		local file=$3
+		local after=${4//\//\\\/}
+		local error
+
+		# Colouring output
+		local yellow reset
+		[[ -t 0 || -t 1 ]] && yellow='\e[33m' reset='\e[0m'
+
+		# Replace password string by asterisks in output string
+		if [[ $GCI_PASSWORD == 1 ]]
+		then
+			local password=$(sed -E "s/^.*${pattern}[[:blank:]]*//" <<< "$setting_raw")
+			setting_raw="$(sed -E "s/(^.*${pattern}[[:blank:]]*).*$/\1/" <<< "$setting_raw")${password//?/*}"
+			unset -v password
+		fi
+
+		syntax_error()
+		{
+			[[ $after ]] && after="after line \$4\n	$after (raw escaped input)\n"
+			[[ $error ]] && error="\n\"grep\" or \"sed\" reported the following error:\n	$error\n"
+
+			G_WHIP_MSG "[FAILED] Syntax error
+$error
+Couldn't add setting \$2
+	$setting (escaped input)
+into file \$3
+	$file
+$after
+NB:
+ - Within double quotes \"\", as usual, escape literally meant double quotes and dollar signs \$ via:
+ 	\\\" respectively \\\$
+ - Within single quotes '', as usual, escape literally meant single quotes via:
+ 	'\'' # <End leading string>; <Add escaped single quote>; <Start trailing string>
+ - Additionally in case of extended regular expression support (\$1 and \$4), the following characters need to be escaped via backslash \, if wanted literally:
+	\ . + * ? [ ( { ^ & $ |
+ - Do not escape forward slashes /, which will be done internally for all arguments!"
+		}
+
+		if [[ ! -w $file ]]
+		then
+			G_WHIP_MSG "[FAILED] File does not exist or cannot be written to by current user
+\nPlease verify the existence of the file \$3
+	$file
+\nRetry with proper permissions or apply the setting manually:
+	$setting_raw"
+
+		# As an error within the condition leads to result "false", it can be caught only in next "elif"/"else" statement.
+		elif error=$(grep -Eq "^[[:blank:]]*$pattern" "$file" 2>&1)
+		then
+			if [[ $GCI_PRESERVE == 1 ]]
+			then
+				# shellcheck disable=SC2015
+				G_DIETPI-NOTIFY 0 "Current setting in $yellow$file$reset will be preserved: $yellow$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')$reset"
+
+			elif error=$(grep -Eq "^[[:blank:]]*$setting$" "$file" 2>&1)
+			then
+				# shellcheck disable=SC2015
+				G_DIETPI-NOTIFY 0 "Desired setting in $yellow$file$reset was already set: $yellow$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')$reset"
+
+			elif error=$( (( $(grep -Ec "^[[:blank:]]*$pattern" "$file" 2>&1) > 1 )) 2>&1)
+			then
+				[[ $error ]] && { syntax_error; return 1; }
+
+				G_WHIP_MSG "[FAILED] Setting was found multiple times
+\nThe pattern \$1
+	$(sed -E "c\\$pattern" <<< '')
+was found multiple times in file \$3
+	$file
+\n____________
+$(grep -En "^[[:blank:]]*$pattern" "$file")
+____________
+\nEither the pattern \$1 needs to be more specific or the desired setting can appear multiple times by design and it cannot be predicted which instance to edit.
+Please retry with more specific parameter \$1 or apply the setting manually:
+	$setting_raw"
+			else
+				[[ $error ]] && { syntax_error; return 1; }
+
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
+				error=$(sed --follow-symlinks -Ei "0,/^[[:blank:]]*$pattern.*$/s//$setting/" "$file" 2>&1) || { syntax_error; return 1; }
+				G_DIETPI-NOTIFY 0 "Setting in $yellow$file$reset adjusted: $yellow${setting_raw//\\/\\\\}$reset"
+			fi
+
+		elif error=$(grep -Eq "^[[:blank:]#;]*$pattern" "$file" 2>&1)
+		then
+			[[ $error ]] && { syntax_error; return 1; }
+
+			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
+			error=$(sed --follow-symlinks -Ei "0,/^[[:blank:]#;]*$pattern.*$/s//$setting/" "$file" 2>&1) || { syntax_error; return 1; }
+			G_DIETPI-NOTIFY 0 "Comment in $yellow$file$reset converted to setting: $yellow${setting_raw//\\/\\\\}$reset"
+		else
+			[[ $error ]] && { syntax_error; return 1; }
+
+			if [[ $after ]]
+			then
+				if error=$(grep -Eq "^[[:blank:]]*$after" "$file" 2>&1)
+				then
+					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
+					error=$(sed --follow-symlinks -Ei "0,/^[[:blank:]]*$after.*$/s//&\n$setting/" "$file" 2>&1) || { syntax_error; return 1; }
+					G_DIETPI-NOTIFY 0 "Added setting $yellow${setting_raw//\\/\\\\}$reset to $yellow$file$reset after line $yellow$(grep -Em1 "^[[:blank:]]*$after" "$file" | sed 's|\\|\\\\|g')$reset"
+				else
+					[[ $error ]] && { syntax_error; return 1; }
+
+					G_WHIP_MSG "[FAILED] Setting could not be added after desired line
+\nThe pattern \$4
+	$(sed -E "c\\$after" <<< '')
+could not be found in file \$3
+	$file
+\nPlease retry with valid parameter \$4 or apply the setting manually:
+	$setting_raw"
+				fi
+			else
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
+				# The following sed does not work on empty files, hence add some dummy comment in case:
+				[[ -s $file ]] || echo '# Added by DietPi:' >> "$file"
+				error=$(sed --follow-symlinks -Ei "\$a\\$setting" "$file" 2>&1) || { syntax_error; return 1; }
+				G_DIETPI-NOTIFY 0 "Added setting $yellow${setting_raw//\\/\\\\}$reset to end of file $yellow$file$reset"
+			fi
+		fi
+
+		unset -f syntax_error
+	}
+
+	# Subprocess-less sleep
+	# - $1 = Number of seconds to pause. Can be a fractional number.
+	G_SLEEP_FD=
+	G_SLEEP()
+	{
+		[[ $G_SLEEP_FD ]] || exec {G_SLEEP_FD}<> <(:)
+		read -rt "$1" -u "$G_SLEEP_FD" || :
+	}
+
+	# Override for poweroff/halt/reboot commands to mute dbus/logind error messages on Bookworm and above, if dbus/logind is not installed/masked: https://github.com/MichaIng/DietPi/issues/6500
+	if [[ -L '/etc/systemd/system/systemd-logind.service' ]]
+	then
+		poweroff()
+		{
+			local command='poweroff'
+			for i in "$@"
+			do
+				case $i in
+					'-p'|'--poweroff'|'--no-wall') :;;
+					'--reboot') command='reboot';;
+					'--halt') command='halt';;
+					*) /sbin/poweroff "$@"; return $?;;
+				esac
+			done
+			systemctl start "$command.target"
+		}
+		reboot()
+		{
+			local command='reboot'
+			for i in "$@"
+			do
+				case $i in
+					'-p'|'--poweroff') command='poweroff';;
+					'--reboot'|'--no-wall') :;;
+					'--halt') command='halt';;
+					*) /sbin/reboot "$@"; return $?;;
+				esac
+			done
+			systemctl start "$command.target"
+		}
+		halt()
+		{
+			local command='halt'
+			for i in "$@"
+			do
+				case $i in
+					'-p'|'--poweroff') command='poweroff';;
+					'--reboot') command='reboot';;
+					'--halt'|'--no-wall') :;;
+					*) /sbin/halt "$@"; return $?;;
+				esac
+			done
+			systemctl start "$command.target"
+		}
+	fi
+
+	#-----------------------------------------------------------------------------------
+	: # Return exit code 0, by triggering null as last command to output
+	#-----------------------------------------------------------------------------------
+}

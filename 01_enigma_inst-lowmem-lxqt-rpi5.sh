@@ -75,7 +75,7 @@ print_status "Starting Raspberry Pi 5 low-memory LXQt/Openbox setup..."
 # ---------------------------------------------------------------------------
 # Globals / helpers
 # ---------------------------------------------------------------------------
-LOGFILE="$HOME/.inst-lowmem-lxqt-rpi5.log"
+LOGFILE="$HOME/.profile/.inst-lowmem-lxqt-rpi5.log"
 SKIPPED_PKGS=()
 FAILED_STEPS=()
 REBOOT_NEEDED=0
@@ -1618,11 +1618,13 @@ banner "26. CONFIGURING WALLPAPERS"
 # ======================================================
 
 cp -r "./enigma-wallpapers" "$HOME/Pictures"
-cp -r "$HOME/Pictures/enigma-wallpapers" "/usr/share/desktop-base"
-
-#ln  -s  "/usr/share/desktop-base/"  "/usr/share/k314-wallpapers/k314-wallpapers" 
+mkdir -p /usr/share/wallpapers
+cp -r "$HOME/Pictures/enigma-wallpapers" "/usr/share/wallpapers"
+pushd .
 
 feh --bg-fill "$HOME/Pictures/Hexagons-1920x1080.jpg"
+
+popd
 
 # ===========================================================================
 banner "27 - Summary"

@@ -535,6 +535,11 @@ apt_install \
     lxqt-qtplugin \
     lxqt-themes
 
+# Without this plugin Qt cannot load .svg files: the menu button's icon and
+# every SVG-only icon theme entry come up blank. It is only a Recommends of
+# the Qt libraries, so a minimal install does not pull it in.
+apt_install qt6-svg-plugins
+
 # ===========================================================================
 banner "08 - Openbox window manager"
 # ===========================================================================

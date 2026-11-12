@@ -1620,11 +1620,10 @@ banner "26. CONFIGURING WALLPAPERS"
 cp -r "./enigma-wallpapers" "$HOME/Pictures"
 mkdir -p /usr/share/wallpapers
 cp -r "$HOME/Pictures/enigma-wallpapers" "/usr/share/wallpapers"
-pushd .
 
-feh --bg-fill "$HOME/Pictures/Hexagons-1920x1080.jpg"
+#feh --bg-fill "$HOME/Pictures/Hexagons-1920x1080.jpg"
+pcmanfm --set-wallpaper "$HOME/Pictures/Hexagons-1920x1080.jpg"
 
-popd
 
 # ===========================================================================
 banner "27 - Summary"

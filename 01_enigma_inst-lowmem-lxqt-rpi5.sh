@@ -75,7 +75,8 @@ print_status "Starting Raspberry Pi 5 low-memory LXQt/Openbox setup..."
 # ---------------------------------------------------------------------------
 # Globals / helpers
 # ---------------------------------------------------------------------------
-LOGFILE="$HOME/.profile/.inst-lowmem-lxqt-rpi5.log"
+mkdir -p "$HOME/.config" 
+LOGFILE="$HOME/.config/inst-lowmem-lxqt-rpi5.log"
 SKIPPED_PKGS=()
 FAILED_STEPS=()
 REBOOT_NEEDED=0

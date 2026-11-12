@@ -59,10 +59,10 @@ note_fail() {
     print_error "$1"
 }
 
-printf ".\n.\n"
+print_status "---------------------------------------------------------------------------"
 print_status "Configuration of [ qterminal ] BEGIN..."
-printf ".\n.\n"
-
+print_status "---------------------------------------------------------------------------"
+sleep 3
 
 if dpkg -s crudini &>/dev/null; then
   print_status "Crudini package found ..."
@@ -100,7 +100,7 @@ print_status "... Setting fontSize to $fontSize..."
 
 crudini --set "$dir/qterminal.ini" "$section" "fontSize" "$fontSize"
 
-printf ".\n.\n"
+print_status "---------------------------------------------------------------------------"
 print_status "Configuration of [ qterminal ] END..."
-printf ".\n.\n"
+print_status "---------------------------------------------------------------------------"
 

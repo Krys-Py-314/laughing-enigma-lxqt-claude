@@ -1613,8 +1613,19 @@ MCEOF
 chmod +x "$HOME/.local/bin/memcheck"
 print_status "Installed ~/.local/bin/memcheck (run it after logging in to the desktop)."
 
+# ======================================================
+banner "26. CONFIGURING WALLPAPERS"
+# ======================================================
+
+cp -r "./enigma-wallpapers" "$HOME/Pictures"
+cp -r "$HOME/Pictures/enigma-wallpapers" "/usr/share/desktop-base"
+
+#ln  -s  "/usr/share/desktop-base/"  "/usr/share/k314-wallpapers/k314-wallpapers" 
+
+feh --bg-fill "$HOME/Pictures/Hexagons-1920x1080.jpg"
+
 # ===========================================================================
-banner "26 - Summary"
+banner "27 - Summary"
 # ===========================================================================
 
 echo ""

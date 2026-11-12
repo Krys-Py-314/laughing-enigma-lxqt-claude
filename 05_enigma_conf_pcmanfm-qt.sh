@@ -61,10 +61,10 @@ note_fail() {
     print_error "$1"
 }
 
-printf ".\n.\n"
+print_status "---------------------------------------------------------------------------"
 print_status "Configuration of [pcmanfm-qt] BEGIN..."
-printf ".\n.\n"
-
+print_status "---------------------------------------------------------------------------"
+sleep 3
 
 if dpkg -s crudini &>/dev/null; then
   print_status "Crudini package found ..."
@@ -84,7 +84,7 @@ for dir in "$HOME/.config/pcmanfm-qt/default" "$HOME/.config/pcmanfm-qt/lxqt"; d
     crudini --set "$dir/settings.conf" "FolderView" "SortHiddenLast" "false"
 done
 
-printf ".\n.\n"
+print_status "---------------------------------------------------------------------------"
 print_status "Configuration of [pcmanfm-qt] END..."
-printf ".\n.\n"
+print_status "---------------------------------------------------------------------------"
 

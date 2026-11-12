@@ -131,7 +131,10 @@ fi
 # ---------------------------------------------------------------------------
 # Hide
 # ---------------------------------------------------------------------------
+print_status "---------------------------------------------------------------------------"
 print_status "Hiding \"QTerminal drop down\" from the Fancy Menu (${MODE})..."
+print_status "---------------------------------------------------------------------------"
+sleep 3
 
 if [ ! -f "$SRC" ]; then
     print_warning "${SRC} not found - is qterminal installed?"
@@ -195,3 +198,5 @@ print_status "Wrote ${DEST}"
 print_status "\"QTerminal drop down\" is now hidden from System Tools."
 print_status "If the menu still shows it, log out and back in (or reboot)."
 print_status "To show it again: $0 --undo$([ "$MODE" = "system" ] && echo " --system")"
+print_status "---------------------------------------------------------------------------"
+

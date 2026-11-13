@@ -16,7 +16,6 @@
 #     NO_DESKTOP=1     do not enable the PCManFM-Qt desktop process
 #     NO_APPLETS=1     do not install the system tray applications
 #     ASSUME_YES=1     never prompt (non-interactive)
-#     MENU_ICON=raspberry   raspberry on the menu button instead of three lines
 #
 
 set -uo pipefail
@@ -255,14 +254,10 @@ banner "03 - Icon for the application menu"
 # ===========================================================================
 
 mkdir -p "$HOME/.local/share/icons"
-MENU_ICON="${MENU_ICON:-lines}"
-MENU_ICON_FILE=""
-
-if [ "$MENU_ICON" != "raspberry" ]; then
-    # Three white lines. Written as our own file: the ready-made "open-menu"
-    # icons of the icon themes are dark grey and vanish on the dark panel.
-    MENU_ICON_FILE="$HOME/.local/share/icons/menu-lines.svg"
-    cat >"$MENU_ICON_FILE" <<'SVGEOF'
+# Three white lines. Written as our own file: the ready-made "open-menu"
+# icons of the icon themes are dark grey and vanish on the dark panel.
+MENU_ICON_FILE="$HOME/.local/share/icons/menu-lines.svg"
+cat >"$MENU_ICON_FILE" <<'SVGEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <g fill="#ffffff">
@@ -272,52 +267,7 @@ if [ "$MENU_ICON" != "raspberry" ]; then
   </g>
 </svg>
 SVGEOF
-    print_status "Installed the three-line menu icon: $MENU_ICON_FILE"
-fi
-
-# MENU_ICON=raspberry: prefer a real Raspberry Pi logo if the system has one.
-[ "$MENU_ICON" = "raspberry" ] && for cand in \
-    /usr/share/raspberrypi-artwork/raspberry-pi-logo.svg \
-    /usr/share/raspberrypi-artwork/raspswirl.png \
-    /usr/share/icons/PiXflat/apps/48/rpi.png \
-    /usr/share/icons/Papirus-Dark/64x64/apps/raspberry-pi.svg \
-    /usr/share/icons/Papirus/64x64/apps/raspberry-pi.svg ; do
-    [ -f "$cand" ] && { MENU_ICON_FILE="$cand"; break; }
-done
-
-if [ "$MENU_ICON" != "raspberry" ]; then
-    :
-elif [ -n "$MENU_ICON_FILE" ]; then
-    print_status "Using system raspberry icon: $MENU_ICON_FILE"
-else
-    # Nothing suitable installed, so ship our own. A self-contained SVG is
-    # more reliable than hunting for an icon name that varies between themes.
-    MENU_ICON_FILE="$HOME/.local/share/icons/raspberry-menu.svg"
-    cat >"$MENU_ICON_FILE" <<'SVGEOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <g fill="#75A928">
-    <path d="M25 14c-5-4-11-4-13-1 -2 3 1 8 6 10 2-4 4-7 7-9z"/>
-    <path d="M39 14c5-4 11-4 13-1 2 3-1 8-6 10 -2-4-4-7-7-9z"/>
-    <path d="M32 10c-3 0-5 3-5 6 0 2 2 4 5 4s5-2 5-4c0-3-2-6-5-6z"/>
-  </g>
-  <g fill="#BC1142">
-    <circle cx="24" cy="30" r="6"/>
-    <circle cx="40" cy="30" r="6"/>
-    <circle cx="32" cy="34" r="6.5"/>
-    <circle cx="24" cy="41" r="6"/>
-    <circle cx="40" cy="41" r="6"/>
-    <circle cx="32" cy="48" r="6"/>
-  </g>
-  <g fill="#8E0B2E" opacity="0.45">
-    <circle cx="32" cy="48" r="2.2"/>
-    <circle cx="24" cy="41" r="2"/>
-    <circle cx="40" cy="41" r="2"/>
-  </g>
-</svg>
-SVGEOF
-    print_status "Installed a bundled raspberry icon: $MENU_ICON_FILE"
-fi
+print_status "Installed the three-line menu icon: $MENU_ICON_FILE"
 
 # ===========================================================================
 banner "04 - Openbox: generating and applying the ${OB_THEME} theme"
@@ -562,7 +512,7 @@ EOF
 fi
 
 # ===========================================================================
-banner "09 - LXQt panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, ${MENU_ICON} menu icon"
+banner "09 - LXQt panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, three-line menu icon"
 # ===========================================================================
 
 PANEL="$HOME/.config/lxqt/panel.conf"
@@ -745,7 +695,7 @@ else
     print_warning "lxqt-leave not found; second Quick Launch left empty."
 fi
 
-print_status "Panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, bottom, ${MENU_ICON} menu icon."
+print_status "Panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, bottom, three-line menu icon."
 print_warning "lxqt-panel has no true separator plugin; fixed 8px spacers are used."
 
 # ===========================================================================

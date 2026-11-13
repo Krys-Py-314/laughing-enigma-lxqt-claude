@@ -31,6 +31,8 @@
 # Order of Accessories: Terminal, File Manager, Text Editor, Web Browser,
 #     then everything else alphabetically.
 #
+# Quick Launch icons of renamed apps show the new label as tooltip.
+#
 # Also removes the Pi-Apps launcher icon from the desktop (Pi-Apps itself and
 # its menu entry stay).
 #
@@ -102,6 +104,7 @@ SIDE="Left"
 DO_POSITION=1
 DO_RENAME=1
 RESTORE_NAMES=0
+REMOVED_IDS=()
 ORDER="custom"          # custom | keep | default
 USER_MENU_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/menus"
 MENU_MARKER="enigma_conf_lxqt_panel.sh: Accessories order"
@@ -133,7 +136,7 @@ for arg in "$@"; do
         --no-rename)     DO_RENAME=0 ;;
         --no-order)      ORDER="keep" ;;
         --default-order) ORDER="default" ;;
-        --restore-names) RESTORE_NAMES=1; DO_RENAME=0; DO_POSITION=0 ;;
+        --restore-names) RESTORE_NAMES=1; DO_RENAME=0; DO_POSITION=0; ORDER="keep" ;;
         -h|--help) usage; exit 0 ;;
         *)         print_error "Unknown option: $arg"; usage; exit 1 ;;
     esac
@@ -169,6 +172,9 @@ read_menu_sections() {
     mapfile -t SECTIONS < <(plugin_sections "$PANEL" fancymenu)
     mapfile -t MAIN_SECTIONS < <(plugin_sections "$PANEL" mainmenu)
     MENU_SECTIONS=("${SECTIONS[@]}" "${MAIN_SECTIONS[@]}")
+    mapfile -t QL_SECTIONS < <(plugin_sections "$PANEL" quicklaunch)
+    # --restore-names only puts the Quick Launch entries back.
+    [ "$DO_POSITION" = "1" ] || SECTIONS=()
 }
 
 # Prints the system .desktop file for an app: first by file ID, then by
@@ -224,13 +230,16 @@ if [ "$RESTORE_NAMES" = "1" ]; then
             mv -f -- "${dest}.before-rename" "$dest"
         else
             rm -f -- "$dest"
+            REMOVED_IDS+=("$(basename -- "$dest")")
         fi
         print_status "Restored $(basename -- "$dest")"
         restored=1
     done
     [ "$restored" = "1" ] || print_status "No renamed entries found - nothing to restore."
     refresh_menu_cache
-    exit 0
+    # Quick Launch entries pointing at a copy that is gone now have to go
+    # back to the system launcher; that is done with the panel.conf edit below.
+    { [ "${#REMOVED_IDS[@]}" -gt 0 ] && [ -f "$PANEL" ]; } || exit 0
 fi
 
 if [ "$DO_RENAME" = "1" ]; then
@@ -310,7 +319,7 @@ fi
 DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null)" || DESKTOP_DIR=""
 [ -n "$DESKTOP_DIR" ] && [ "$DESKTOP_DIR" != "$HOME" ] || DESKTOP_DIR="$HOME/Desktop"
 PIAPPS_ICON="${DESKTOP_DIR}/pi-apps.desktop"
-if [ -f "$PIAPPS_ICON" ] && grep -q '^Exec=.*pi-apps' "$PIAPPS_ICON"; then
+if [ "$RESTORE_NAMES" != "1" ] && [ -f "$PIAPPS_ICON" ] && grep -q '^Exec=.*pi-apps' "$PIAPPS_ICON"; then
     if rm -f -- "$PIAPPS_ICON"; then
         print_status "Removed the Pi-Apps desktop icon (${PIAPPS_ICON})."
     else
@@ -318,7 +327,7 @@ if [ -f "$PIAPPS_ICON" ] && grep -q '^Exec=.*pi-apps' "$PIAPPS_ICON"; then
     fi
 fi
 
-[ "$DO_POSITION" = "1" ] || exit 0
+[ "$DO_POSITION" = "1" ] || [ "$RESTORE_NAMES" = "1" ] || exit 0
 
 # ---------------------------------------------------------------------------
 # Find panel.conf
@@ -339,11 +348,12 @@ if [ ! -f "$PANEL" ]; then
 fi
 
 read_menu_sections
-if [ "${#MENU_SECTIONS[@]}" -eq 0 ]; then
+if [ "$RESTORE_NAMES" = "1" ]; then
+    :
+elif [ "${#MENU_SECTIONS[@]}" -eq 0 ]; then
     print_error "No menu widget (Fancy Menu or Application Menu) found in ${PANEL}."
     exit 1
-fi
-if [ "${#SECTIONS[@]}" -gt 0 ]; then
+elif [ "${#SECTIONS[@]}" -gt 0 ]; then
     print_status "Fancy Menu section(s): ${SECTIONS[*]} - categories go to the ${SIDE}."
 else
     print_status "The panel uses the classic Application Menu (${MAIN_SECTIONS[*]}); it has no"
@@ -386,7 +396,7 @@ MENU_ACTION="keep"
 MENU_DEST=""
 
 # menu_file= of the first menu widget (empty when not set).
-CUR_MENU="$(awk -v s="${MENU_SECTIONS[0]}" '
+CUR_MENU="$(awk -v s="${MENU_SECTIONS[0]:-}" '
     /^\[.*\][ \t]*$/ { sec = substr($0, 2, index($0, "]") - 2); next }
     sec == s && /^[ \t]*menu_file[ \t]*=/ { sub(/^[ \t]*menu_file[ \t]*=[ \t]*/, ""); print; exit }
 ' "$PANEL")"
@@ -488,6 +498,27 @@ elif [ "$ORDER" = "default" ]; then
     esac
 fi
 
+# ---------------------------------------------------------------------------
+# Quick Launch tooltips
+# ---------------------------------------------------------------------------
+# A Quick Launch icon shows the Name= of the .desktop file its entry points
+# at. Pointing the entry at the renamed copy in ~/.local/share/applications
+# gives the tooltip the new label; --restore-names points it back at the
+# system file. QL_MAP holds "file name <TAB> path to use" lines.
+QL_MAP=""
+if [ "$RESTORE_NAMES" = "1" ]; then
+    for id in "${REMOVED_IDS[@]}"; do
+        if src="$(find_source "$id" "-")"; then
+            QL_MAP+="${id}"$'\t'"${src}"$'\n'
+        fi
+    done
+elif [ "$DO_RENAME" = "1" ]; then
+    for f in "$APPS_DIR"/*.desktop; do
+        [ -f "$f" ] && grep -qx "$MARKER" "$f" || continue
+        QL_MAP+="$(basename -- "$f")"$'\t'"${f}"$'\n'
+    done
+fi
+
 TMP="$(mktemp "${PANEL}.XXXXXX")" || { print_error "mktemp failed"; exit 1; }
 trap 'rm -f "$TMP"' EXIT
 
@@ -496,8 +527,12 @@ trap 'rm -f "$TMP"' EXIT
 # section (fancymenu and mainmenu): the same for menu_file, when it changes.
 awk -v secs="$(printf '%s\n' "${SECTIONS[@]}")" -v val="$VALUE" \
     -v msecs="$(printf '%s\n' "${MENU_SECTIONS[@]}")" \
-    -v maction="$MENU_ACTION" -v mfile="$MENU_DEST" '
+    -v maction="$MENU_ACTION" -v mfile="$MENU_DEST" \
+    -v qsecs="$(printf '%s\n' "${QL_SECTIONS[@]}")" -v qmap="$QL_MAP" '
     BEGIN {
+        n = split(qsecs, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") qwant[a[i]] = 1
+        n = split(qmap, a, "\n")
+        for (i = 1; i <= n; i++) { t = index(a[i], "\t"); if (t) qm[substr(a[i], 1, t - 1)] = substr(a[i], t + 1) }
         n = split(secs, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") want[a[i]] = 1
         n = split(msecs, a, "\n"); for (i = 1; i <= n; i++) if (a[i] != "") mwant[a[i]] = 1
     }
@@ -510,6 +545,11 @@ awk -v secs="$(printf '%s\n' "${SECTIONS[@]}")" -v val="$VALUE" \
     }
     (sec in want) && /^[ \t]*categoriesAtRight[ \t]*=/ { next }
     (sec in mwant) && maction != "keep" && /^[ \t]*menu_file[ \t]*=/ { next }
+    (sec in qwant) && /^apps\\[0-9]+\\desktop[ \t]*=/ {
+        key = $0; sub(/[ \t]*=.*/, "", key)
+        b = $0; sub(/^[^=]*=[ \t]*/, "", b); sub(/.*\//, "", b)
+        if (b in qm) { print key "=" qm[b]; next }
+    }
     { print }
 ' "$PANEL" >"$TMP"
 

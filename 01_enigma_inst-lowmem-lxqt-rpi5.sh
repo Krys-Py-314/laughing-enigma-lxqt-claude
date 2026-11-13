@@ -75,8 +75,7 @@ print_status "Starting Raspberry Pi 5 low-memory LXQt/Openbox setup..."
 # ---------------------------------------------------------------------------
 # Globals / helpers
 # ---------------------------------------------------------------------------
-mkdir -p "$HOME/.config" 
-LOGFILE="$HOME/.config/inst-lowmem-lxqt-rpi5.log"
+LOGFILE="$HOME/.inst-lowmem-lxqt-rpi5.log"
 SKIPPED_PKGS=()
 FAILED_STEPS=()
 REBOOT_NEEDED=0
@@ -535,6 +534,11 @@ apt_install \
     lxqt-policykit \
     lxqt-qtplugin \
     lxqt-themes
+
+# Without this plugin Qt cannot load .svg files: the menu button's icon and
+# every SVG-only icon theme entry come up blank. It is only a Recommends of
+# the Qt libraries, so a minimal install does not pull it in.
+apt_install qt6-svg-plugins
 
 # ===========================================================================
 banner "08 - Openbox window manager"
@@ -1614,20 +1618,8 @@ MCEOF
 chmod +x "$HOME/.local/bin/memcheck"
 print_status "Installed ~/.local/bin/memcheck (run it after logging in to the desktop)."
 
-# ======================================================
-banner "26. CONFIGURING WALLPAPERS"
-# ======================================================
-
-cp -r "./enigma-wallpapers" "$HOME/Pictures"
-mkdir -p /usr/share/wallpapers
-cp -r "$HOME/Pictures/enigma-wallpapers" "/usr/share/wallpapers"
-
-#feh --bg-fill "$HOME/Pictures/Hexagons-1920x1080.jpg"
-pcmanfm --set-wallpaper "$HOME/Pictures/Hexagons-1920x1080.jpg"
-
-
 # ===========================================================================
-banner "27 - Summary"
+banner "26 - Summary"
 # ===========================================================================
 
 echo ""

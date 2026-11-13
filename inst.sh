@@ -1,6 +1,7 @@
 #!/bin/bash
 sudo /bin/cp -f ./enigma_bashrc $HOME/.bashrc
 ./01_enigma_inst-lowmem-lxqt-rpi5.sh
+MENU_PLUGIN=mainmenu
 ./02_enigma_inst_dark_theme_and_icons.v2.sh
 ./03_enigma_hide_qterminal_drop.sh
 ./04_enigma_conf_featherpad.sh

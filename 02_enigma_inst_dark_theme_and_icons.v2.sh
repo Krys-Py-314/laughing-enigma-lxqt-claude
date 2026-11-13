@@ -16,6 +16,7 @@
 #     NO_DESKTOP=1     do not enable the PCManFM-Qt desktop process
 #     NO_APPLETS=1     do not install the system tray applications
 #     ASSUME_YES=1     never prompt (non-interactive)
+#     MENU_PLUGIN=mainmenu   classic Application Menu instead of Fancy Menu
 #
 
 set -uo pipefail
@@ -554,8 +555,16 @@ fi
 # layout option at all - its categories are hover submenus, full stop - so
 # prefer fancymenu wherever the panel ships it. Plugins register themselves
 # with a .desktop file, which is what makes this detectable.
-if [ -f /usr/share/lxqt/lxqt-panel/fancymenu.desktop ]; then
-    MENU_PLUGIN="fancymenu"
+# MENU_PLUGIN=mainmenu in the environment picks the classic menu instead.
+MENU_PLUGIN="${MENU_PLUGIN:-fancymenu}"
+case "$MENU_PLUGIN" in
+    fancymenu|mainmenu) ;;
+    *)  print_warning "MENU_PLUGIN='${MENU_PLUGIN}' is not fancymenu or mainmenu; using fancymenu."
+        MENU_PLUGIN="fancymenu" ;;
+esac
+if [ "$MENU_PLUGIN" = "mainmenu" ]; then
+    print_status "Using the classic Application Menu (MENU_PLUGIN=mainmenu)."
+elif [ -f /usr/share/lxqt/lxqt-panel/fancymenu.desktop ]; then
     print_status "Using the Fancy Menu plugin (categories in a left column)."
 else
     MENU_PLUGIN="mainmenu"

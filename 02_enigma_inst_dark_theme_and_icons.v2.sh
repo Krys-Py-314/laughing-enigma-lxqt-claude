@@ -9,7 +9,7 @@
 #     ./inst_dark_theme_and_icons.sh
 #
 # Applies: Arc-Dark GTK2/GTK3, Papirus-Dark icons, a generated Arc-Dark-Square
-# Openbox theme, Kvantum dark Qt styling, a 48px LXQt panel with a raspberry
+# Openbox theme, Kvantum dark Qt styling, a 48px LXQt panel with a three-line
 # menu icon, and the PCManFM-Qt desktop with your icon/label settings.
 #
 # Environment overrides:
@@ -47,17 +47,12 @@ if [ "$EUID" -eq 0 ]; then
     exit 1
 fi
 
-
-print_status "---------------------------------------------------------------------------"
 print_status "Starting Dark Theme and Icons Setup..."
-print_status "---------------------------------------------------------------------------"
-sleep 3
-
 
 # ---------------------------------------------------------------------------
 # Globals
 # ---------------------------------------------------------------------------
-LOGFILE="$HOME/.config/inst_dark_theme_and_icons.log"
+LOGFILE="$HOME/inst_dark_theme_and_icons.log"
 SKIPPED_PKGS=()
 FAILED_STEPS=()
 
@@ -255,53 +250,24 @@ else
 fi
 
 # ===========================================================================
-banner "03 - Raspberry icon for the application menu"
+banner "03 - Icon for the application menu"
 # ===========================================================================
 
 mkdir -p "$HOME/.local/share/icons"
-RASPBERRY_ICON=""
-
-# Prefer a real Raspberry Pi logo if the system has one.
-for cand in \
-    /usr/share/raspberrypi-artwork/raspberry-pi-logo.svg \
-    /usr/share/raspberrypi-artwork/raspswirl.png \
-    /usr/share/icons/PiXflat/apps/48/rpi.png \
-    /usr/share/icons/Papirus-Dark/64x64/apps/raspberry-pi.svg \
-    /usr/share/icons/Papirus/64x64/apps/raspberry-pi.svg ; do
-    [ -f "$cand" ] && { RASPBERRY_ICON="$cand"; break; }
-done
-
-if [ -n "$RASPBERRY_ICON" ]; then
-    print_status "Using system raspberry icon: $RASPBERRY_ICON"
-else
-    # Nothing suitable installed, so ship our own. A self-contained SVG is
-    # more reliable than hunting for an icon name that varies between themes.
-    RASPBERRY_ICON="$HOME/.local/share/icons/raspberry-menu.svg"
-    cat >"$RASPBERRY_ICON" <<'SVGEOF'
+# Three white lines. Written as our own file: the ready-made "open-menu"
+# icons of the icon themes are dark grey and vanish on the dark panel.
+MENU_ICON_FILE="$HOME/.local/share/icons/menu-lines.svg"
+cat >"$MENU_ICON_FILE" <<'SVGEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <g fill="#75A928">
-    <path d="M25 14c-5-4-11-4-13-1 -2 3 1 8 6 10 2-4 4-7 7-9z"/>
-    <path d="M39 14c5-4 11-4 13-1 2 3-1 8-6 10 -2-4-4-7-7-9z"/>
-    <path d="M32 10c-3 0-5 3-5 6 0 2 2 4 5 4s5-2 5-4c0-3-2-6-5-6z"/>
-  </g>
-  <g fill="#BC1142">
-    <circle cx="24" cy="30" r="6"/>
-    <circle cx="40" cy="30" r="6"/>
-    <circle cx="32" cy="34" r="6.5"/>
-    <circle cx="24" cy="41" r="6"/>
-    <circle cx="40" cy="41" r="6"/>
-    <circle cx="32" cy="48" r="6"/>
-  </g>
-  <g fill="#8E0B2E" opacity="0.45">
-    <circle cx="32" cy="48" r="2.2"/>
-    <circle cx="24" cy="41" r="2"/>
-    <circle cx="40" cy="41" r="2"/>
+  <g fill="#ffffff">
+    <rect x="12" y="16" width="40" height="6" rx="3"/>
+    <rect x="12" y="29" width="40" height="6" rx="3"/>
+    <rect x="12" y="42" width="40" height="6" rx="3"/>
   </g>
 </svg>
 SVGEOF
-    print_status "Installed a bundled raspberry icon: $RASPBERRY_ICON"
-fi
+print_status "Installed the three-line menu icon: $MENU_ICON_FILE"
 
 # ===========================================================================
 banner "04 - Openbox: generating and applying the ${OB_THEME} theme"
@@ -546,7 +512,7 @@ EOF
 fi
 
 # ===========================================================================
-banner "09 - LXQt panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, raspberry menu"
+banner "09 - LXQt panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, three-line menu icon"
 # ===========================================================================
 
 PANEL="$HOME/.config/lxqt/panel.conf"
@@ -596,7 +562,7 @@ else
     print_warning "Fancy Menu not available (needs LXQt 2.0+); using the classic"
     print_warning "mainmenu, whose categories can only be hover submenus."
 fi
-MENU_PLUGIN="mainmenu"
+
 # lxqt-panel has no dedicated separator plugin; a small fixed spacer is the
 # conventional stand-in, so each requested "Separator" becomes one.
 cat >"$PANEL" <<EOF
@@ -622,7 +588,7 @@ width-percent=true
 [${MENU_PLUGIN}]
 type=${MENU_PLUGIN}
 ownIcon=true
-icon=${RASPBERRY_ICON}
+icon=${MENU_ICON_FILE}
 showText=false
 categoriesAtRight=false
 buttonsAtTop=false
@@ -686,39 +652,14 @@ showOnClicked=true
 
 [worldclock]
 type=worldclock
-alignment=Center
-autoRotate=true
-showTimeZone=false
-is24h=true
-timeFormat=hh:mm
-timePadHour=true
-timeShowSeconds=false
-showTime=true
-showDate=true
-datePadDay=true
-datePosition=below
-dateShowDoW=false
-dateShowYear=false
-dateFormat=dd-MMM
-showTimezone=false
-showWeekNumber=true
+showWeekNumber=false
+formatType=custom
+useAdvancedManualFormat=true
+customFormat="'<span style=\"font-size:${PANEL_CLOCK_FONT_PT}pt;\">'HH:mm'</span><br/><font size=\"-2\">'dd/MM'</font>'"
 
 [quicklaunch2]
 type=quicklaunch
 EOF
-
-#[worldclock]
-#type=worldclock
-#showWeekNumber=false
-#formatType=custom
-#useAdvancedManualFormat=true
-#customFormat=<span style="font-size:${PANEL_CLOCK_FONT_PT}pt;">hh:mm</span>
-
-#[quicklaunch2]
-#type=quicklaunch
-#EOF
-
-
 
 # Fill the two quicklaunch plugins with whatever was actually found.
 ql_index=0
@@ -754,7 +695,7 @@ else
     print_warning "lxqt-leave not found; second Quick Launch left empty."
 fi
 
-print_status "Panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, bottom, raspberry menu icon."
+print_status "Panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, bottom, three-line menu icon."
 print_warning "lxqt-panel has no true separator plugin; fixed 8px spacers are used."
 
 # ===========================================================================
@@ -856,7 +797,7 @@ echo "  LXQt theme     : ${LXQT_THEME}"
 echo "  Qt style       : kvantum-dark${KV_THEME:+  (engine: ${KV_THEME})}"
 echo "  Font           : ${UI_FONT_NAME} ${UI_FONT_SIZE}, Normal"
 echo "  Panel          : ${PANEL_HEIGHT}px, ${PANEL_ICON_SIZE}px icons, bottom"
-echo "  Menu icon      : ${RASPBERRY_ICON}"
+echo "  Menu icon      : ${MENU_ICON_FILE}"
 if [ "$NO_DESKTOP" = "1" ]; then
 echo "  Desktop        : not enabled (NO_DESKTOP=1); settings written"
 else

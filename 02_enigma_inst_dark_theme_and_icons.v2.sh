@@ -9,13 +9,14 @@
 #     ./inst_dark_theme_and_icons.sh
 #
 # Applies: Arc-Dark GTK2/GTK3, Papirus-Dark icons, a generated Arc-Dark-Square
-# Openbox theme, Kvantum dark Qt styling, a 48px LXQt panel with a raspberry
+# Openbox theme, Kvantum dark Qt styling, a 48px LXQt panel with a three-line
 # menu icon, and the PCManFM-Qt desktop with your icon/label settings.
 #
 # Environment overrides:
 #     NO_DESKTOP=1     do not enable the PCManFM-Qt desktop process
 #     NO_APPLETS=1     do not install the system tray applications
 #     ASSUME_YES=1     never prompt (non-interactive)
+#     MENU_ICON=raspberry   raspberry on the menu button instead of three lines
 #
 
 set -uo pipefail
@@ -250,29 +251,49 @@ else
 fi
 
 # ===========================================================================
-banner "03 - Raspberry icon for the application menu"
+banner "03 - Icon for the application menu"
 # ===========================================================================
 
 mkdir -p "$HOME/.local/share/icons"
-RASPBERRY_ICON=""
+MENU_ICON="${MENU_ICON:-lines}"
+MENU_ICON_FILE=""
 
-# Prefer a real Raspberry Pi logo if the system has one.
-for cand in \
+if [ "$MENU_ICON" != "raspberry" ]; then
+    # Three white lines. Written as our own file: the ready-made "open-menu"
+    # icons of the icon themes are dark grey and vanish on the dark panel.
+    MENU_ICON_FILE="$HOME/.local/share/icons/menu-lines.svg"
+    cat >"$MENU_ICON_FILE" <<'SVGEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <g fill="#ffffff">
+    <rect x="12" y="16" width="40" height="6" rx="3"/>
+    <rect x="12" y="29" width="40" height="6" rx="3"/>
+    <rect x="12" y="42" width="40" height="6" rx="3"/>
+  </g>
+</svg>
+SVGEOF
+    print_status "Installed the three-line menu icon: $MENU_ICON_FILE"
+fi
+
+# MENU_ICON=raspberry: prefer a real Raspberry Pi logo if the system has one.
+[ "$MENU_ICON" = "raspberry" ] && for cand in \
     /usr/share/raspberrypi-artwork/raspberry-pi-logo.svg \
     /usr/share/raspberrypi-artwork/raspswirl.png \
     /usr/share/icons/PiXflat/apps/48/rpi.png \
     /usr/share/icons/Papirus-Dark/64x64/apps/raspberry-pi.svg \
     /usr/share/icons/Papirus/64x64/apps/raspberry-pi.svg ; do
-    [ -f "$cand" ] && { RASPBERRY_ICON="$cand"; break; }
+    [ -f "$cand" ] && { MENU_ICON_FILE="$cand"; break; }
 done
 
-if [ -n "$RASPBERRY_ICON" ]; then
-    print_status "Using system raspberry icon: $RASPBERRY_ICON"
+if [ "$MENU_ICON" != "raspberry" ]; then
+    :
+elif [ -n "$MENU_ICON_FILE" ]; then
+    print_status "Using system raspberry icon: $MENU_ICON_FILE"
 else
     # Nothing suitable installed, so ship our own. A self-contained SVG is
     # more reliable than hunting for an icon name that varies between themes.
-    RASPBERRY_ICON="$HOME/.local/share/icons/raspberry-menu.svg"
-    cat >"$RASPBERRY_ICON" <<'SVGEOF'
+    MENU_ICON_FILE="$HOME/.local/share/icons/raspberry-menu.svg"
+    cat >"$MENU_ICON_FILE" <<'SVGEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
   <g fill="#75A928">
@@ -295,7 +316,7 @@ else
   </g>
 </svg>
 SVGEOF
-    print_status "Installed a bundled raspberry icon: $RASPBERRY_ICON"
+    print_status "Installed a bundled raspberry icon: $MENU_ICON_FILE"
 fi
 
 # ===========================================================================
@@ -541,7 +562,7 @@ EOF
 fi
 
 # ===========================================================================
-banner "09 - LXQt panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, raspberry menu"
+banner "09 - LXQt panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, ${MENU_ICON} menu icon"
 # ===========================================================================
 
 PANEL="$HOME/.config/lxqt/panel.conf"
@@ -617,7 +638,7 @@ width-percent=true
 [${MENU_PLUGIN}]
 type=${MENU_PLUGIN}
 ownIcon=true
-icon=${RASPBERRY_ICON}
+icon=${MENU_ICON_FILE}
 showText=false
 categoriesAtRight=false
 buttonsAtTop=false
@@ -724,7 +745,7 @@ else
     print_warning "lxqt-leave not found; second Quick Launch left empty."
 fi
 
-print_status "Panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, bottom, raspberry menu icon."
+print_status "Panel: ${PANEL_HEIGHT}px tall, ${PANEL_ICON_SIZE}px icons, bottom, ${MENU_ICON} menu icon."
 print_warning "lxqt-panel has no true separator plugin; fixed 8px spacers are used."
 
 # ===========================================================================
@@ -826,7 +847,7 @@ echo "  LXQt theme     : ${LXQT_THEME}"
 echo "  Qt style       : kvantum-dark${KV_THEME:+  (engine: ${KV_THEME})}"
 echo "  Font           : ${UI_FONT_NAME} ${UI_FONT_SIZE}, Normal"
 echo "  Panel          : ${PANEL_HEIGHT}px, ${PANEL_ICON_SIZE}px icons, bottom"
-echo "  Menu icon      : ${RASPBERRY_ICON}"
+echo "  Menu icon      : ${MENU_ICON_FILE}"
 if [ "$NO_DESKTOP" = "1" ]; then
 echo "  Desktop        : not enabled (NO_DESKTOP=1); settings written"
 else

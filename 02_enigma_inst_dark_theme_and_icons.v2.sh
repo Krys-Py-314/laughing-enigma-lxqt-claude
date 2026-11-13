@@ -524,15 +524,20 @@ mkdir -p "$(dirname "$PANEL")"
 find_desktop() {
     local n
     for n in "$@"; do
-        for d in /usr/share/applications "$HOME/.local/share/applications"; do
+        for d in /usr/share/applications /usr/local/share/applications "$HOME/.local/share/applications"; do
             [ -f "${d}/${n}.desktop" ] && { printf '%s' "${d}/${n}.desktop"; return 0; }
         done
     done
     return 1
 }
+# Quick Launch order: terminal, file manager, text editor, web browser.
+# QTerminal is normally installed later (by the qterminal script), so get it
+# now - otherwise a first install would fall back to urxvt here.
+dpkg -s qterminal >/dev/null 2>&1 || apt_install qterminal
+QL_TERM="$(find_desktop qterminal org.lxqt.qterminal rxvt-unicode urxvt debian-uxterm)" || QL_TERM=""
 QL_FM="$(find_desktop pcmanfm-qt org.lxqt.pcmanfm-qt)" || QL_FM=""
-QL_TERM="$(find_desktop rxvt-unicode urxvt debian-uxterm)" || QL_TERM=""
-QL_EDIT="$(find_desktop l3afpad leafpad)" || QL_EDIT=""
+QL_EDIT="$(find_desktop featherpad org.featherpad.FeatherPad l3afpad leafpad)" || QL_EDIT=""
+QL_WEB="$(find_desktop vimb)" || QL_WEB=""
 
 # urxvt ships no .desktop file on Debian, so provide one for quicklaunch.
 if [ -z "$QL_TERM" ] && command -v urxvt >/dev/null 2>&1; then
@@ -672,13 +677,13 @@ EOF
 
 # Fill the two quicklaunch plugins with whatever was actually found.
 ql_index=0
-for app in "$QL_FM" "$QL_TERM" "$QL_EDIT"; do
+for app in "$QL_TERM" "$QL_FM" "$QL_EDIT" "$QL_WEB"; do
     [ -n "$app" ] || continue
     ql_index=$((ql_index + 1))
     ini_set "$PANEL" quicklaunch "apps\\${ql_index}\\desktop" "$app"
 done
 ini_set "$PANEL" quicklaunch "apps\\size" "$ql_index"
-print_status "Quick Launch: ${ql_index} app(s) - ${QL_FM:-no FM} ${QL_TERM:-} ${QL_EDIT:-}"
+print_status "Quick Launch: ${ql_index} app(s) - ${QL_TERM:-no terminal} ${QL_FM:-no FM} ${QL_EDIT:-no editor} ${QL_WEB:-no browser}"
 
 # quicklaunch2 holds the leave/logout dialog.
 LEAVE="$(find_desktop lxqt-leave)" || LEAVE=""
